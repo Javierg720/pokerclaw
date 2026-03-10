@@ -75,11 +75,24 @@ def generate_crypto_addresses(user_id: str):
     }
 
 def sanitize_game_for_response(game, show_cards=False):
-    """Remove deck and optionally hide hole cards"""
+    """Remove deck and optionally hide hole cards. Include turn info."""
     g = {k: v for k, v in game.items() if k not in ('_id', 'deck')}
-    if not show_cards and g.get('phase') not in ('showdown', 'complete'):
+    show = show_cards or g.get('phase') in ('showdown', 'complete')
+    if not show:
         for p in g.get('players', []):
             p['hole_cards'] = [None, None]
+    # Map internal phases to display phases for frontend
+    phase_display = {
+        'preflop_betting': 'preflop',
+        'flop_deal': 'flop',
+        'flop_betting': 'flop',
+        'turn_deal': 'turn',
+        'turn_betting': 'turn',
+        'river_deal': 'river',
+        'river_betting': 'river',
+    }
+    g['display_phase'] = phase_display.get(g.get('phase'), g.get('phase'))
+    g['is_betting'] = g.get('phase', '').endswith('_betting')
     return g
 
 
@@ -409,7 +422,7 @@ async def start_game(table_id: str, user=Depends(get_current_user)):
     # Check if there's an active game
     if table.get('current_game_id'):
         existing = await db.games.find_one({"id": table['current_game_id']}, {"_id": 0})
-        if existing and existing['phase'] not in ('complete', 'showdown'):
+        if existing and existing['phase'] not in ('complete',):
             raise HTTPException(status_code=400, detail="Game already in progress")
 
     # Get agents for this table
@@ -448,6 +461,11 @@ async def start_game(table_id: str, user=Depends(get_current_user)):
         "deck": deck,
         "dealer_index": 0,
         "actions_log": [],
+        "current_actor": None,
+        "turn_index": 0,
+        "round_bet": 0,
+        "round_phase": None,
+        "last_action": None,
         "winner_id": None,
         "winner_name": None,
         "winning_hand": None,
@@ -563,7 +581,7 @@ async def place_bet(req: BetRequest, user=Depends(get_current_user)):
     game = await db.games.find_one({"id": req.game_id}, {"_id": 0})
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
-    if game['phase'] in ('showdown', 'complete'):
+    if game['phase'] in ('complete',):
         raise HTTPException(status_code=400, detail="Cannot bet on completed game")
 
     # Check agent is in game

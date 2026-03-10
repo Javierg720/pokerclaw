@@ -15,9 +15,16 @@ import { useTableSocket } from '../lib/useWebSocket';
 const PHASE_LABELS = {
   waiting: 'Waiting',
   preflop: 'Pre-Flop',
+  preflop_betting: 'Pre-Flop',
   flop: 'Flop',
+  flop_deal: 'Flop',
+  flop_betting: 'Flop',
   turn: 'Turn',
+  turn_deal: 'Turn',
+  turn_betting: 'Turn',
   river: 'River',
+  river_deal: 'River',
+  river_betting: 'River',
   showdown: 'Showdown',
   complete: 'Complete',
 };
@@ -72,16 +79,32 @@ const CHIP_DIRS = {
 const BOT_CELLS = new Set(['botLeft', 'botCenter', 'botRight']);
 
 /* ── Seat component ── */
-function SeatPlayer({ player, showCards, isWinner, reversed, dealFrom }) {
+function SeatPlayer({ player, showCards, isWinner, reversed, dealFrom, isActing, timerPct, lastAction }) {
   const ringClass = player.folded
     ? 'agent-ring-folded'
     : isWinner
     ? 'agent-ring-winner'
+    : isActing
+    ? 'agent-ring-thinking'
     : 'agent-ring-active';
 
   const avatar = (
     <div className="flex flex-col items-center gap-0.5">
       <div className="relative">
+        {/* Timer ring */}
+        {isActing && (
+          <svg className="absolute -inset-1.5 w-[calc(100%+12px)] h-[calc(100%+12px)]" viewBox="0 0 44 44">
+            <circle cx="22" cy="22" r="20" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="2" />
+            <circle
+              cx="22" cy="22" r="20" fill="none" stroke="#FF003C"
+              strokeWidth="2.5" strokeLinecap="round"
+              strokeDasharray={`${2 * Math.PI * 20}`}
+              strokeDashoffset={`${2 * Math.PI * 20 * (1 - timerPct)}`}
+              transform="rotate(-90 22 22)"
+              className="transition-all duration-1000 linear"
+            />
+          </svg>
+        )}
         <div className={`agent-ring ${ringClass}`}>
           <img
             src={player.avatar_url}
@@ -94,6 +117,11 @@ function SeatPlayer({ player, showCards, isWinner, reversed, dealFrom }) {
         )}
         {isWinner && (
           <Crown size={12} className="text-[#FFE600] absolute -top-1 -right-1" />
+        )}
+        {isActing && (
+          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 bg-[#FF003C] text-white text-[7px] font-black px-1.5 py-0.5 rounded-full animate-pulse" data-testid={`timer-${player.agent_id}`}>
+            THINKING
+          </div>
         )}
       </div>
       <div className={`seat-nameplate ${isWinner ? 'is-winner' : ''} ${player.folded ? 'is-folded' : ''}`}>
@@ -123,6 +151,13 @@ function SeatPlayer({ player, showCards, isWinner, reversed, dealFrom }) {
 
   const actionBadge = player.folded ? (
     <span className="action-badge action-fold text-[7px]">FOLD</span>
+  ) : lastAction && lastAction.agent_id === player.agent_id ? (
+    <span className={`action-badge text-[7px] ${
+      lastAction.action === 'raise' ? 'action-raise' :
+      lastAction.action === 'fold' ? 'action-fold' : 'action-call'
+    }`}>
+      {lastAction.action.toUpperCase()}{lastAction.amount > 0 ? ` ${lastAction.amount}` : ''}
+    </span>
   ) : showCards && player.hand_name ? (
     <span className="text-[8px] text-[#00F0FF] font-bold">{player.hand_name}</span>
   ) : null;
@@ -147,13 +182,13 @@ function SeatPlayer({ player, showCards, isWinner, reversed, dealFrom }) {
 }
 
 /* ── Poker Table Visual ── */
-function PokerTableVisual({ game, showCards }) {
+function PokerTableVisual({ game, showCards, currentActor, timerPct, lastAction }) {
   const players = game?.players || [];
-  const isShowdown = ['showdown', 'complete'].includes(game?.phase);
+  const isShowdown = ['showdown', 'complete'].includes(game?.display_phase || game?.phase);
   const count = Math.min(Math.max(players.length, 4), 6);
   const layout = SEAT_LAYOUTS[count] || SEAT_LAYOUTS[4];
 
-  // Build cell → player mapping
+  // Build cell -> player mapping
   const cellMap = {};
   layout.forEach(({ cell, idx }) => {
     if (players[idx]) cellMap[cell] = players[idx];
@@ -179,6 +214,9 @@ function PokerTableVisual({ game, showCards }) {
             isWinner={isShowdown && game.winner_id === player.agent_id}
             reversed={BOT_CELLS.has(cellName)}
             dealFrom={DEAL_DIRS[cellName]}
+            isActing={currentActor === player.agent_id}
+            timerPct={currentActor === player.agent_id ? timerPct : 0}
+            lastAction={lastAction}
           />
         )}
       </div>
@@ -266,7 +304,11 @@ export default function TablePage() {
   const [actions, setActions] = useState([]);
   const [soundOn, setSoundOn] = useState(sounds.isEnabled());
   const [odds, setOdds] = useState(null);
+  const [timer, setTimer] = useState(0);
+  const [timerMax] = useState(10);
   const prevPhaseRef = useRef(null);
+  const timerRef = useRef(null);
+  const autoAdvanceRef = useRef(null);
 
   // WebSocket for real-time updates
   const { gameState: wsGame, spectators, connected } = useTableSocket(tableId);
@@ -315,26 +357,27 @@ export default function TablePage() {
   useEffect(() => {
     if (!game) return;
     const prev = prevPhaseRef.current;
-    const curr = game.phase;
+    const curr = game.display_phase || game.phase;
     prevPhaseRef.current = curr;
 
     if (!prev || prev === curr) return;
 
-    if (['preflop'].includes(curr)) sounds.cardDeal();
+    if (curr === 'preflop') sounds.cardDeal();
     if (['flop', 'turn', 'river'].includes(curr)) {
       sounds.cardFlip();
       sounds.notification();
     }
-    if (curr === 'showdown') {
+    if (curr === 'showdown' || curr === 'complete') {
       if (game.winner_name) sounds.winFanfare();
     }
+  }, [game?.display_phase, game?.phase, game?.winner_name]);
 
-    // Play action sounds for latest actions
-    const newActions = game.actions_log?.slice(-4) || [];
-    newActions.forEach((a, i) => {
-      setTimeout(() => sounds.actionSound(a.action), i * 150);
-    });
-  }, [game]);
+  // Play action sound when last_action changes
+  useEffect(() => {
+    if (game?.last_action) {
+      sounds.actionSound(game.last_action.action);
+    }
+  }, [game?.last_action]);
 
   const startGame = async () => {
     try {
@@ -355,7 +398,8 @@ export default function TablePage() {
       const res = await api.post(`/games/${game.id}/advance`);
       setGame(res.data);
       setActions(res.data.actions_log || []);
-      if (res.data.phase === 'showdown' || res.data.phase === 'complete') {
+      setTimer(timerMax); // Reset timer for next turn
+      if (res.data.phase === 'complete') {
         setAutoPlay(false);
         if (res.data.winner_name) {
           toast.success(`${res.data.winner_name} wins with ${res.data.winning_hand}!`);
@@ -367,22 +411,66 @@ export default function TablePage() {
     } finally {
       setAdvancing(false);
     }
-  }, [game, advancing]);
+  }, [game, advancing, timerMax]);
 
+  // Auto-advance timer: When autoPlay is on AND there's a current_actor,
+  // count down from 10s then advance
   useEffect(() => {
-    if (!autoPlay || !game || game.phase === 'complete' || game.phase === 'showdown') return;
-    const timer = setTimeout(advanceGame, 2500);
-    return () => clearTimeout(timer);
-  }, [autoPlay, game, advanceGame]);
+    // Clear existing timers
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (autoAdvanceRef.current) clearTimeout(autoAdvanceRef.current);
+
+    if (!autoPlay || !game || game.phase === 'complete') return;
+
+    // If game is in a deal phase (not betting), advance quickly
+    if (game.phase?.endsWith('_deal') || game.phase === 'waiting' || game.phase === 'showdown') {
+      autoAdvanceRef.current = setTimeout(advanceGame, 800);
+      return () => {
+        if (autoAdvanceRef.current) clearTimeout(autoAdvanceRef.current);
+      };
+    }
+
+    // Betting phase: use 10-second timer
+    if (game.is_betting && game.current_actor) {
+      // Random decision time: 2-8 seconds to feel natural
+      const decisionTime = Math.floor(Math.random() * 6000) + 2000;
+      setTimer(timerMax);
+
+      // Countdown ticker
+      timerRef.current = setInterval(() => {
+        setTimer(prev => {
+          if (prev <= 0) return 0;
+          return prev - 1;
+        });
+      }, 1000);
+
+      // Auto-advance after decision time
+      autoAdvanceRef.current = setTimeout(advanceGame, decisionTime);
+
+      return () => {
+        if (timerRef.current) clearInterval(timerRef.current);
+        if (autoAdvanceRef.current) clearTimeout(autoAdvanceRef.current);
+      };
+    }
+
+    // Fallback: advance after short delay
+    autoAdvanceRef.current = setTimeout(advanceGame, 1500);
+    return () => {
+      if (autoAdvanceRef.current) clearTimeout(autoAdvanceRef.current);
+    };
+  }, [autoPlay, game?.phase, game?.current_actor, game?.turn_index, advanceGame, timerMax]);
 
   const toggleSound = () => {
     const on = sounds.toggle();
     setSoundOn(on);
   };
 
-  const canBet = game && !['showdown', 'complete', 'waiting'].includes(game.phase);
-  const showCards = game && ['showdown', 'complete'].includes(game.phase);
+  const displayPhase = game?.display_phase || game?.phase;
+  const canBet = game && !['showdown', 'complete', 'waiting'].includes(displayPhase);
+  const showCards = game && ['showdown', 'complete'].includes(displayPhase);
   const lastActions = actions.slice(-6);
+  const currentActor = game?.current_actor;
+  const timerPct = timerMax > 0 ? timer / timerMax : 0;
 
   return (
     <div className="main-content" data-testid="table-page">
@@ -396,7 +484,7 @@ export default function TablePage() {
           <div className="flex items-center justify-center gap-2 mt-0.5">
             {game && (
               <Badge variant="outline" className="text-[10px] border-[#FF003C]/30 text-[#FF003C]">
-                {PHASE_LABELS[game.phase] || game.phase}
+                {PHASE_LABELS[displayPhase] || displayPhase}
               </Badge>
             )}
             <span className="flex items-center gap-1 text-[10px] text-white/30">
@@ -464,7 +552,13 @@ export default function TablePage() {
         /* Active game - Poker Table View */
         <div className="px-2 space-y-3">
           {/* THE POKER TABLE */}
-          <PokerTableVisual game={game} showCards={showCards} />
+          <PokerTableVisual
+            game={game}
+            showCards={showCards}
+            currentActor={currentActor}
+            timerPct={timerPct}
+            lastAction={game?.last_action}
+          />
 
           {/* Actions Log */}
           {lastActions.length > 0 && (
@@ -483,11 +577,24 @@ export default function TablePage() {
             </div>
           )}
 
+          {/* Timer Display */}
+          {autoPlay && game?.is_betting && currentActor && (
+            <div className="flex items-center justify-center gap-2 mx-2" data-testid="decision-timer">
+              <div className="glass rounded-lg px-3 py-1.5 flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-[#FF003C] animate-pulse" />
+                <span className="text-[10px] text-white/50">
+                  {game.players?.find(p => p.agent_id === currentActor)?.agent_name || 'Agent'} deciding...
+                </span>
+                <span className="text-xs font-black text-[#FF003C] mono">{timer}s</span>
+              </div>
+            </div>
+          )}
+
           {/* Controls */}
           <div className="flex items-center gap-3 mx-2">
             <Button
               onClick={advanceGame}
-              disabled={advancing || game.phase === 'showdown'}
+              disabled={advancing || game.phase === 'complete'}
               data-testid="advance-btn"
               className="flex-1 bg-[#FF003C] hover:bg-[#cc0030] text-white font-bold rounded-xl disabled:opacity-40"
             >

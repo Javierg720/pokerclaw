@@ -181,6 +181,14 @@
 .agent-ring-winner {
   background: linear-gradient(135deg, #FFE600, #FF8C00);
 }
+.agent-ring-thinking {
+  background: linear-gradient(135deg, #FF003C, #FF6B3D);
+  animation: thinking-glow 1.5s ease-in-out infinite;
+}
+@keyframes thinking-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(255, 0, 60, 0.3); }
+  50% { box-shadow: 0 0 18px rgba(255, 0, 60, 0.6); }
+}
 
 /* Betting chip */
 .bet-chip {

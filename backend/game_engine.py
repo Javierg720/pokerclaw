@@ -137,98 +137,170 @@ def agent_decide(strategy_name, strength, pot, current_bet, chips, phase):
     return 'call', min(current_bet, chips)
 
 
-def run_betting_round(players, community_cards, pot, phase):
-    actions = []
-    current_bet = 20 if phase == 'preflop' else 0
-    active = [p for p in players if not p['folded'] and p['chips'] > 0]
+def _get_active_players(players):
+    """Get players that can still act (not folded, have chips)."""
+    return [p for p in players if not p['folded'] and p['chips'] > 0]
 
-    for player in active:
-        strength = hand_strength(
-            player['hole_cards'],
-            community_cards if community_cards else None
-        )
-        action, amount = agent_decide(
-            player['strategy'], strength, pot, current_bet, player['chips'], phase
-        )
 
-        if action == 'fold':
-            player['folded'] = True
-            actions.append({
-                'agent_id': player['agent_id'],
-                'agent_name': player['agent_name'],
-                'action': 'fold', 'amount': 0
-            })
-        elif action == 'raise':
-            player['chips'] -= amount
-            player['current_bet'] += amount
-            player['total_bet'] += amount
-            pot += amount
-            current_bet = max(current_bet, amount)
-            actions.append({
-                'agent_id': player['agent_id'],
-                'agent_name': player['agent_name'],
-                'action': 'raise', 'amount': amount
-            })
-        else:
-            call_amt = min(current_bet, player['chips'])
-            player['chips'] -= call_amt
-            player['current_bet'] += call_amt
-            player['total_bet'] += call_amt
-            pot += call_amt
-            actions.append({
-                'agent_id': player['agent_id'],
-                'agent_name': player['agent_name'],
-                'action': 'call', 'amount': call_amt
-            })
-
-    # Reset current bets for next round
-    for p in players:
-        p['current_bet'] = 0
-
-    return players, pot, actions
+def _get_betting_phase(game_phase):
+    """Map game phase to the betting round name."""
+    mapping = {
+        'preflop': 'preflop',
+        'preflop_betting': 'preflop',
+        'flop_betting': 'flop',
+        'turn_betting': 'turn',
+        'river_betting': 'river',
+    }
+    return mapping.get(game_phase, 'preflop')
 
 
 def advance_game(game):
+    """
+    Turn-by-turn game advancement. Each call processes ONE agent's action
+    or a phase transition (dealing cards).
+
+    Phase flow:
+      waiting -> dealing (deal hole cards)
+      dealing -> preflop_betting (turn-by-turn)
+      preflop_betting (all acted) -> flop_deal
+      flop_deal -> flop_betting (turn-by-turn)
+      flop_betting (all acted) -> turn_deal
+      turn_deal -> turn_betting (turn-by-turn)
+      turn_betting (all acted) -> river_deal
+      river_deal -> river_betting (turn-by-turn)
+      river_betting (all acted) -> showdown
+      showdown -> complete
+    """
     phase = game['phase']
     deck = game['deck']
     players = game['players']
     community = game['community_cards']
     pot = game['pot']
-    actions = []
+    action = None
 
+    # ── WAITING: Deal hole cards ──
     if phase == 'waiting':
-        # Deal hole cards
         for p in players:
             p['hole_cards'] = [deck.pop(), deck.pop()]
             p['folded'] = False
             p['current_bet'] = 0
             p['total_bet'] = 0
             p['chips'] = 1000
-        # Pre-flop betting
-        players, pot, actions = run_betting_round(players, None, pot, 'preflop')
-        game['phase'] = 'preflop'
+        game['phase'] = 'preflop_betting'
+        game['turn_index'] = 0
+        game['round_bet'] = 20  # Big blind
+        game['round_phase'] = 'preflop'
 
-    elif phase == 'preflop':
-        # Deal flop
+    # ── BETTING ROUNDS (turn-by-turn) ──
+    elif phase in ('preflop_betting', 'flop_betting', 'turn_betting', 'river_betting'):
+        active = _get_active_players(players)
+        turn_idx = game.get('turn_index', 0)
+
+        # Check if only one player left (everyone else folded)
+        if len(active) <= 1:
+            # Skip to showdown
+            game['phase'] = 'showdown'
+            game['turn_index'] = 0
+        elif turn_idx >= len(active):
+            # All players have acted this round -> transition to next phase
+            for p in players:
+                p['current_bet'] = 0
+            game['turn_index'] = 0
+            game['round_bet'] = 0
+
+            if phase == 'preflop_betting':
+                game['phase'] = 'flop_deal'
+            elif phase == 'flop_betting':
+                game['phase'] = 'turn_deal'
+            elif phase == 'turn_betting':
+                game['phase'] = 'river_deal'
+            elif phase == 'river_betting':
+                game['phase'] = 'showdown'
+        else:
+            # Process ONE agent's action
+            player = active[turn_idx]
+            betting_phase = _get_betting_phase(phase)
+            strength = hand_strength(
+                player['hole_cards'],
+                community if community else None
+            )
+            act, amount = agent_decide(
+                player['strategy'], strength, pot,
+                game.get('round_bet', 0), player['chips'], betting_phase
+            )
+
+            if act == 'fold':
+                player['folded'] = True
+                action = {
+                    'agent_id': player['agent_id'],
+                    'agent_name': player['agent_name'],
+                    'action': 'fold', 'amount': 0
+                }
+            elif act == 'raise':
+                player['chips'] -= amount
+                player['current_bet'] += amount
+                player['total_bet'] += amount
+                pot += amount
+                game['round_bet'] = max(game.get('round_bet', 0), amount)
+                action = {
+                    'agent_id': player['agent_id'],
+                    'agent_name': player['agent_name'],
+                    'action': 'raise', 'amount': amount
+                }
+            else:
+                call_amt = min(game.get('round_bet', 0), player['chips'])
+                player['chips'] -= call_amt
+                player['current_bet'] += call_amt
+                player['total_bet'] += call_amt
+                pot += call_amt
+                action = {
+                    'agent_id': player['agent_id'],
+                    'agent_name': player['agent_name'],
+                    'action': 'call', 'amount': call_amt
+                }
+
+            game['turn_index'] = turn_idx + 1
+            # Set who acts next (for frontend timer display)
+            next_active = _get_active_players(players)
+            next_idx = game['turn_index']
+            if next_idx < len(next_active):
+                game['current_actor'] = next_active[next_idx]['agent_id']
+            else:
+                game['current_actor'] = None
+
+    # ── DEAL PHASES ──
+    elif phase == 'flop_deal':
         deck.pop()  # burn
         community.extend([deck.pop() for _ in range(3)])
-        players, pot, actions = run_betting_round(players, community, pot, 'flop')
-        game['phase'] = 'flop'
+        game['phase'] = 'flop_betting'
+        game['turn_index'] = 0
+        game['round_bet'] = 0
+        game['round_phase'] = 'flop'
+        active = _get_active_players(players)
+        game['current_actor'] = active[0]['agent_id'] if active else None
 
-    elif phase == 'flop':
+    elif phase == 'turn_deal':
         deck.pop()  # burn
         community.append(deck.pop())
-        players, pot, actions = run_betting_round(players, community, pot, 'turn')
-        game['phase'] = 'turn'
+        game['phase'] = 'turn_betting'
+        game['turn_index'] = 0
+        game['round_bet'] = 0
+        game['round_phase'] = 'turn'
+        active = _get_active_players(players)
+        game['current_actor'] = active[0]['agent_id'] if active else None
 
-    elif phase == 'turn':
+    elif phase == 'river_deal':
         deck.pop()  # burn
         community.append(deck.pop())
-        players, pot, actions = run_betting_round(players, community, pot, 'river')
-        game['phase'] = 'river'
+        game['phase'] = 'river_betting'
+        game['turn_index'] = 0
+        game['round_bet'] = 0
+        game['round_phase'] = 'river'
+        active = _get_active_players(players)
+        game['current_actor'] = active[0]['agent_id'] if active else None
 
-    elif phase == 'river':
-        # Showdown - evaluate hands
+    # ── SHOWDOWN ──
+    elif phase == 'showdown':
         active = [p for p in players if not p['folded']]
         if len(active) == 1:
             winner = active[0]
@@ -253,15 +325,15 @@ def advance_game(game):
         house_rake = int(pot * 0.20)
         game['house_rake'] = house_rake
         game['final_pot'] = pot - house_rake
-        game['phase'] = 'showdown'
-
-    elif phase == 'showdown':
         game['phase'] = 'complete'
+        game['current_actor'] = None
 
     game['deck'] = deck
     game['players'] = players
     game['community_cards'] = community
     game['pot'] = pot
-    game['actions_log'] = game.get('actions_log', []) + actions
+    if action:
+        game['actions_log'] = game.get('actions_log', []) + [action]
+        game['last_action'] = action
 
     return game
