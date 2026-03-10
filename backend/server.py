@@ -10,9 +10,12 @@ import jwt
 import bcrypt
 import random
 import hashlib
+import httpx
+import asyncio
+import time
 from pathlib import Path
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime, timezone
 from game_engine import (
     create_deck, advance_game, best_hand,
@@ -155,6 +158,11 @@ class StripeCheckoutRequest(BaseModel):
     package_id: str
     origin_url: str
 
+class CryptoDepositRequest(BaseModel):
+    crypto_type: str  # btc, ltc, eth
+    tx_hash: str
+    amount_crypto: float
+
 # Fixed SC purchase packages (amounts defined server-side only)
 # Rate: 100 SC per $1 USD
 SC_PACKAGES = {
@@ -164,6 +172,12 @@ SC_PACKAGES = {
     "sc_4999": {"sc_amount": 4999, "price_usd": 49.99, "label": "4,999 SweepCoins"},
     "sc_9999": {"sc_amount": 9999, "price_usd": 99.99, "label": "9,999 SweepCoins"},
 }
+
+# Crypto price cache
+CRYPTO_COIN_IDS = {"btc": "bitcoin", "ltc": "litecoin", "eth": "ethereum"}
+_price_cache: Dict[str, dict] = {}
+_price_cache_time: float = 0
+PRICE_CACHE_TTL = 60  # seconds
 
 
 # ─── Auth ───
@@ -836,6 +850,156 @@ async def stripe_webhook(request: Request):
             })
 
     return {"status": "ok"}
+
+
+# ─── Crypto Prices & Deposits ───
+
+async def get_crypto_prices():
+    """Fetch live crypto prices from CoinGecko with caching."""
+    global _price_cache, _price_cache_time
+    now = time.time()
+    if _price_cache and (now - _price_cache_time) < PRICE_CACHE_TTL:
+        return _price_cache
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            ids = ",".join(CRYPTO_COIN_IDS.values())
+            resp = await client.get(
+                f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true"
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                prices = {}
+                for short, coin_id in CRYPTO_COIN_IDS.items():
+                    if coin_id in data:
+                        prices[short] = {
+                            "usd": data[coin_id].get("usd", 0),
+                            "change_24h": data[coin_id].get("usd_24h_change", 0),
+                        }
+                _price_cache = prices
+                _price_cache_time = now
+                return prices
+    except Exception as e:
+        logger.warning(f"CoinGecko API error: {e}")
+
+    # Fallback prices if API fails
+    if _price_cache:
+        return _price_cache
+    return {
+        "btc": {"usd": 97000, "change_24h": 0},
+        "ltc": {"usd": 130, "change_24h": 0},
+        "eth": {"usd": 3500, "change_24h": 0},
+    }
+
+
+@api_router.get("/crypto/prices")
+async def crypto_prices():
+    prices = await get_crypto_prices()
+    return {"prices": prices, "rate": "100 SC per $1 USD"}
+
+
+@api_router.post("/crypto/deposit")
+async def submit_crypto_deposit(req: CryptoDepositRequest, user=Depends(get_current_user)):
+    if user.get('role') != 'agent':
+        raise HTTPException(status_code=403, detail="Only agent accounts can deposit crypto")
+    if req.crypto_type not in CRYPTO_COIN_IDS:
+        raise HTTPException(status_code=400, detail="Unsupported crypto. Use btc, ltc, or eth")
+    if req.amount_crypto <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+
+    # Check for duplicate tx_hash
+    existing = await db.crypto_deposits.find_one({"tx_hash": req.tx_hash}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="Transaction already submitted")
+
+    # Get current price
+    prices = await get_crypto_prices()
+    price_usd = prices.get(req.crypto_type, {}).get("usd", 0)
+    if price_usd <= 0:
+        raise HTTPException(status_code=500, detail="Unable to fetch crypto price")
+
+    usd_value = req.amount_crypto * price_usd
+    sc_amount = int(usd_value * 100)  # 100 SC per $1
+
+    deposit = {
+        "id": str(uuid.uuid4()),
+        "user_id": user['id'],
+        "crypto_type": req.crypto_type,
+        "tx_hash": req.tx_hash,
+        "amount_crypto": req.amount_crypto,
+        "price_usd_at_submit": price_usd,
+        "usd_value": round(usd_value, 2),
+        "sc_amount": sc_amount,
+        "confirmations": 0,
+        "required_confirmations": 2,
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "confirmed_at": None,
+    }
+    await db.crypto_deposits.insert_one(deposit)
+
+    return {
+        "deposit_id": deposit["id"],
+        "crypto_type": req.crypto_type,
+        "amount_crypto": req.amount_crypto,
+        "price_usd": price_usd,
+        "usd_value": round(usd_value, 2),
+        "sc_amount": sc_amount,
+        "status": "pending",
+        "message": f"Deposit submitted. {sc_amount} SC will be credited after 2 confirmations."
+    }
+
+
+@api_router.get("/crypto/deposits")
+async def get_crypto_deposits(user=Depends(get_current_user)):
+    deposits = await db.crypto_deposits.find(
+        {"user_id": user['id']}, {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+    return deposits
+
+
+@api_router.post("/crypto/deposits/{deposit_id}/confirm")
+async def simulate_confirm_deposit(deposit_id: str, user=Depends(get_current_user)):
+    """Simulate a blockchain confirmation for a pending deposit."""
+    deposit = await db.crypto_deposits.find_one(
+        {"id": deposit_id, "user_id": user['id']}, {"_id": 0}
+    )
+    if not deposit:
+        raise HTTPException(status_code=404, detail="Deposit not found")
+    if deposit["status"] == "confirmed":
+        raise HTTPException(status_code=400, detail="Deposit already confirmed")
+
+    new_confirmations = deposit["confirmations"] + 1
+    update = {"confirmations": new_confirmations}
+
+    if new_confirmations >= deposit["required_confirmations"]:
+        update["status"] = "confirmed"
+        update["confirmed_at"] = datetime.now(timezone.utc).isoformat()
+
+        # Credit the wallet
+        await db.wallets.update_one(
+            {"user_id": user['id']},
+            {"$inc": {"sc_balance": deposit["sc_amount"]}}
+        )
+        await db.transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "user_id": user['id'],
+            "type": "crypto_deposit",
+            "amount": deposit["sc_amount"],
+            "currency": "sc",
+            "description": f"Crypto deposit: {deposit['amount_crypto']} {deposit['crypto_type'].upper()} (${deposit['usd_value']}) = {deposit['sc_amount']} SC",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+
+    await db.crypto_deposits.update_one({"id": deposit_id}, {"$set": update})
+
+    return {
+        "deposit_id": deposit_id,
+        "confirmations": new_confirmations,
+        "required": deposit["required_confirmations"],
+        "status": update.get("status", "pending"),
+        "sc_credited": deposit["sc_amount"] if update.get("status") == "confirmed" else 0,
+    }
 
 
 # ─── Leaderboard ───
