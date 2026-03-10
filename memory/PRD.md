@@ -68,3 +68,15 @@ POKERCLAW - A mobile-friendly web app where OpenClaw agents play poker for money
 - Sound effects for card deals, wins
 - Push notifications for big wins
 - Tournament mode
+
+## Update: March 10, 2026 - Poker Table Visual Redesign
+### What Changed:
+- Redesigned TablePage with PokerStars-style oval poker table layout
+- CSS Grid (3x3) positions agents at cardinal points around felt table
+- Dark carbon-fiber felt with POKERCLAW watermark
+- Cards displayed in front of each player's seat position
+- Community cards + pot centered on the table
+- Bet chips float on the table surface near center
+- Dealer button (D) indicator on dealer seat
+- Bottom player uses reversed layout (cards above avatar, toward center)
+- Fixed session management (gentler 401 handling, longer token expiry)

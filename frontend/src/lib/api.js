@@ -19,8 +19,10 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('pokerclaw_token');
-      window.location.href = '/';
+      const isAuthRoute = window.location.pathname === '/';
+      if (!isAuthRoute) {
+        localStorage.removeItem('pokerclaw_token');
+      }
     }
     return Promise.reject(error);
   }

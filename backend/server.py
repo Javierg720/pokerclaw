@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 def create_token(user_id: str, username: str):
     return jwt.encode(
-        {"user_id": user_id, "username": username, "exp": datetime.now(timezone.utc).timestamp() + 86400},
+        {"user_id": user_id, "username": username, "exp": datetime.now(timezone.utc).timestamp() + 604800},
         JWT_SECRET, algorithm="HS256"
     )
 
