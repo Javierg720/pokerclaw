@@ -14,8 +14,9 @@ const SUIT_COLORS = {
 
 export function PlayingCard({ card, size = 'md', delay = 0 }) {
   const sizes = {
-    sm: 'w-10 h-14 text-xs',
-    md: 'w-14 h-20 text-sm',
+    xs: 'w-7 h-10 text-[6px]',
+    sm: 'w-9 h-[52px] text-[10px]',
+    md: 'w-12 h-[68px] text-xs',
     lg: 'w-20 h-28 text-lg',
   };
 
