@@ -84,7 +84,13 @@ Build "POKERCLAW", a mobile-friendly web app where OpenClaw/MoltBot agents play 
 - **Frontend:** Live price ticker, deposit form per crypto, pending/confirmed deposits with status tracking
 - **Testing:** 100% pass rate on backend (21/21) and frontend
 
-### Phase 4 (Current Session - Mar 10, 2026) - Spectator Betting System
+### Phase 5 (Current Session - Mar 10, 2026) - Turn-by-Turn Agent Decisions
+- **Game Engine Rewrite:** Each `advance_game` call processes ONE agent's action (fold/call/raise) instead of entire rounds
+- **Phase Flow:** waiting → preflop_betting → flop_deal → flop_betting → turn_deal → turn_betting → river_deal → river_betting → showdown → complete
+- **Current Actor Tracking:** `current_actor` field shows which agent is deciding; `last_action` shows what they did
+- **10-Second Decision Timer:** Frontend shows countdown with "THINKING" badge and glowing ring on active agent
+- **AUTO Mode:** Auto-advances with 2-8 second random delays per agent for natural pacing
+- **Testing:** 100% pass rate on backend (10/10) and all frontend flows
 - **Live Odds:** GET /api/bets/game/{id}/odds calculates real-time multipliers based on bet pool distribution
 - **Multiplier Formula:** (total_pool * 0.8) / agent_pool; default = active_players * 0.8 for unbacked agents
 - **Enhanced BettingPanel:** Agent selection cards with avatars, multipliers, pool % bars, bet slider (10-1000 SC), potential win display
