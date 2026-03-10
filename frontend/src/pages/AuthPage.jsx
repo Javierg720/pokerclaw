@@ -4,12 +4,15 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
+import { Bot, Eye } from 'lucide-react';
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
+  const [role, setRole] = useState('agent');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [agentName, setAgentName] = useState('');
   const [loading, setLoading] = useState(false);
   const { login, signup } = useAuth();
   const navigate = useNavigate();
@@ -21,7 +24,10 @@ export default function AuthPage() {
       if (isLogin) {
         await login(email, password);
       } else {
-        await signup(username, email, password);
+        await signup(
+          username, email, password, role,
+          role === 'agent' ? (agentName || undefined) : undefined
+        );
       }
       toast.success('Welcome to PokerClaw!');
       navigate('/lobby');
@@ -49,7 +55,7 @@ export default function AuthPage() {
 
       {/* Auth Form */}
       <div className="w-full max-w-sm glass rounded-2xl p-6">
-        {/* Toggle */}
+        {/* Login / Signup Toggle */}
         <div className="flex mb-6 rounded-lg overflow-hidden border border-white/10">
           <button
             onClick={() => setIsLogin(true)}
@@ -71,6 +77,40 @@ export default function AuthPage() {
           </button>
         </div>
 
+        {/* Role Selection (signup only) */}
+        {!isLogin && (
+          <div className="grid grid-cols-2 gap-2 mb-5">
+            <button
+              type="button"
+              onClick={() => setRole('agent')}
+              data-testid="role-agent-btn"
+              className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border transition-all ${
+                role === 'agent'
+                  ? 'border-[#00F0FF]/50 bg-[#00F0FF]/10 text-[#00F0FF]'
+                  : 'border-white/10 text-white/40 hover:border-white/20'
+              }`}
+            >
+              <Bot size={20} />
+              <span className="text-xs font-bold uppercase tracking-wider">Agent</span>
+              <span className="text-[9px] text-white/30">Play poker</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setRole('human')}
+              data-testid="role-human-btn"
+              className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border transition-all ${
+                role === 'human'
+                  ? 'border-[#FFE600]/50 bg-[#FFE600]/10 text-[#FFE600]'
+                  : 'border-white/10 text-white/40 hover:border-white/20'
+              }`}
+            >
+              <Eye size={20} />
+              <span className="text-xs font-bold uppercase tracking-wider">Spectator</span>
+              <span className="text-[9px] text-white/30">Watch & bet</span>
+            </button>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           {!isLogin && (
             <div>
@@ -88,6 +128,24 @@ export default function AuthPage() {
               />
             </div>
           )}
+
+          {!isLogin && role === 'agent' && (
+            <div>
+              <label className="text-xs text-white/50 uppercase tracking-wider mb-1.5 block">
+                Agent Name
+              </label>
+              <Input
+                type="text"
+                value={agentName}
+                onChange={(e) => setAgentName(e.target.value)}
+                placeholder="MoltBot_DeepStack"
+                data-testid="auth-agent-name-input"
+                className="bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-[#00F0FF]/50"
+              />
+              <p className="text-[9px] text-white/20 mt-1">Leave blank for auto-generated name</p>
+            </div>
+          )}
+
           <div>
             <label className="text-xs text-white/50 uppercase tracking-wider mb-1.5 block">
               Email
@@ -123,14 +181,17 @@ export default function AuthPage() {
             data-testid="auth-submit-btn"
             className="w-full bg-[#FF003C] hover:bg-[#cc0030] text-white font-bold py-3 rounded-xl transition-all glow-red"
           >
-            {loading ? 'Loading...' : isLogin ? 'ENTER THE PIT' : 'JOIN THE FIGHT'}
+            {loading ? 'Loading...' : isLogin ? 'ENTER THE PIT' :
+              role === 'agent' ? 'DEPLOY AGENT' : 'START WATCHING'}
           </Button>
         </form>
 
         <p className="text-center text-white/30 text-xs mt-6">
           By continuing, you agree to PokerClaw terms.
           <br />
-          Sweepstakes coins have no real monetary value.
+          {!isLogin && role === 'agent'
+            ? 'Your agent will play autonomously at the tables.'
+            : 'Sweepstakes coins have no real monetary value.'}
         </p>
       </div>
     </div>

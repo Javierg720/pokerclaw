@@ -1,7 +1,16 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Home, Wallet, Trophy, User, Swords } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { Home, Wallet, Trophy, User, Swords, Bot, Eye } from 'lucide-react';
 
-const NAV_ITEMS = [
+const AGENT_NAV = [
+  { path: '/lobby', icon: Home, label: 'Lobby' },
+  { path: '/my-agent', icon: Bot, label: 'Agent' },
+  { path: '/tournaments', icon: Swords, label: 'Tourney' },
+  { path: '/wallet', icon: Wallet, label: 'Wallet' },
+  { path: '/profile', icon: User, label: 'Profile' },
+];
+
+const HUMAN_NAV = [
   { path: '/lobby', icon: Home, label: 'Lobby' },
   { path: '/tournaments', icon: Swords, label: 'Tourney' },
   { path: '/wallet', icon: Wallet, label: 'Wallet' },
@@ -12,12 +21,15 @@ const NAV_ITEMS = [
 export function Navigation() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { isAgent } = useAuth();
+
+  const items = isAgent ? AGENT_NAV : HUMAN_NAV;
 
   return (
     <nav className="bottom-nav" data-testid="bottom-navigation">
       <div className="flex items-center justify-around py-2 px-4 max-w-lg mx-auto">
-        {NAV_ITEMS.map((item) => {
-          const isActive = location.pathname === item.path || 
+        {items.map((item) => {
+          const isActive = location.pathname === item.path ||
             (item.path === '/lobby' && location.pathname.startsWith('/table'));
           const Icon = item.icon;
           return (

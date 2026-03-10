@@ -9,6 +9,7 @@ import WalletPage from "./pages/WalletPage";
 import LeaderboardPage from "./pages/LeaderboardPage";
 import ProfilePage from "./pages/ProfilePage";
 import TournamentPage from "./pages/TournamentPage";
+import AgentDashboard from "./pages/AgentDashboard";
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -58,6 +59,10 @@ function AppRoutes() {
       <Route
         path="/tournaments"
         element={<ProtectedRoute><TournamentPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/my-agent"
+        element={<ProtectedRoute><AgentDashboard /></ProtectedRoute>}
       />
       <Route
         path="/profile"

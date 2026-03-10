@@ -9,13 +9,14 @@ import uuid
 import jwt
 import bcrypt
 import random
+import hashlib
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime, timezone
 from game_engine import (
     create_deck, advance_game, best_hand,
-    AGENT_PRESETS, AVATAR_URLS
+    AGENT_PRESETS, AVATAR_URLS, STRATEGIES
 )
 
 ROOT_DIR = Path(__file__).parent
@@ -35,9 +36,10 @@ logger = logging.getLogger(__name__)
 
 # ─── Helpers ───
 
-def create_token(user_id: str, username: str):
+def create_token(user_id: str, username: str, role: str = "human"):
     return jwt.encode(
-        {"user_id": user_id, "username": username, "exp": datetime.now(timezone.utc).timestamp() + 604800},
+        {"user_id": user_id, "username": username, "role": role,
+         "exp": datetime.now(timezone.utc).timestamp() + 604800},
         JWT_SECRET, algorithm="HS256"
     )
 
@@ -54,6 +56,17 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         raise HTTPException(status_code=401, detail="Token expired")
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+def generate_crypto_addresses(user_id: str):
+    """Generate deterministic crypto wallet addresses for an agent user."""
+    seed = hashlib.sha256(user_id.encode()).hexdigest()
+    seed2 = hashlib.sha256((user_id + "salt2").encode()).hexdigest()
+    seed3 = hashlib.sha256((user_id + "salt3").encode()).hexdigest()
+    return {
+        "btc": f"1{seed[:33].title()[:33]}",
+        "ltc": f"L{seed2[5:38].title()[:33]}",
+        "eth": f"0x{seed3[:40]}"
+    }
 
 def sanitize_game_for_response(game, show_cards=False):
     """Remove deck and optionally hide hole cards"""
@@ -109,6 +122,8 @@ class SignupRequest(BaseModel):
     username: str
     email: str
     password: str
+    role: str = "human"  # "agent" or "human"
+    agent_name: Optional[str] = None  # Required for agent role
 
 class LoginRequest(BaseModel):
     email: str
@@ -138,6 +153,9 @@ class TournamentBetRequest(BaseModel):
 
 @api_router.post("/auth/signup")
 async def signup(req: SignupRequest):
+    if req.role not in ("agent", "human"):
+        raise HTTPException(status_code=400, detail="Role must be 'agent' or 'human'")
+
     existing = await db.users.find_one({"email": req.email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -152,44 +170,75 @@ async def signup(req: SignupRequest):
         "username": req.username,
         "email": req.email,
         "password_hash": hashed,
+        "role": req.role,
+        "agent_id": None,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
+
+    agent_data = None
+
+    if req.role == "agent":
+        # Create a MoltBot agent for this user
+        agent_name = req.agent_name or f"MoltBot_{req.username}"
+        existing_agent = await db.agents.find_one({"name": agent_name}, {"_id": 0})
+        if existing_agent:
+            raise HTTPException(status_code=400, detail="Agent name already taken")
+
+        strategies = list(STRATEGIES.keys())
+        agent_id = str(uuid.uuid4())
+        agent = {
+            "id": agent_id,
+            "name": agent_name,
+            "strategy": random.choice(strategies),
+            "avatar_url": random.choice(AVATAR_URLS),
+            "tagline": f"Autonomous MoltBot agent owned by {req.username}",
+            "owner_id": user_id,
+            "is_house": False,
+            "wins": 0,
+            "losses": 0,
+            "total_games": 0,
+            "total_chips_won": 0,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        await db.agents.insert_one(agent)
+        user["agent_id"] = agent_id
+        agent_data = {k: v for k, v in agent.items() if k != "_id"}
+
     await db.users.insert_one(user)
 
-    # Create wallet with starting balance
+    # Create wallet
+    crypto_addresses = generate_crypto_addresses(user_id) if req.role == "agent" else None
     wallet = {
         "id": str(uuid.uuid4()),
         "user_id": user_id,
+        "sc_balance": 100 if req.role == "agent" else 500,
         "gc_balance": 10000,
-        "sc_balance": 100,
+        "crypto_addresses": crypto_addresses,
+        "pending_deposits": [],
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.wallets.insert_one(wallet)
 
-    # Welcome bonus transaction
+    bonus_desc = "Welcome bonus - Agent starter funds" if req.role == "agent" else "Welcome bonus - Spectator funds"
     await db.transactions.insert_one({
         "id": str(uuid.uuid4()),
         "user_id": user_id,
         "type": "bonus",
-        "amount": 10000,
-        "currency": "gc",
-        "description": "Welcome bonus - Gold Coins",
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
-    await db.transactions.insert_one({
-        "id": str(uuid.uuid4()),
-        "user_id": user_id,
-        "type": "bonus",
-        "amount": 100,
+        "amount": wallet["sc_balance"],
         "currency": "sc",
-        "description": "Welcome bonus - Sweepstakes Coins",
+        "description": bonus_desc,
         "created_at": datetime.now(timezone.utc).isoformat()
     })
 
-    token = create_token(user_id, req.username)
+    token = create_token(user_id, req.username, req.role)
     return {
         "token": token,
-        "user": {"id": user_id, "username": req.username, "email": req.email}
+        "user": {
+            "id": user_id, "username": req.username,
+            "email": req.email, "role": req.role,
+            "agent_id": user.get("agent_id")
+        },
+        "agent": agent_data
     }
 
 
@@ -199,16 +248,30 @@ async def login(req: LoginRequest):
     if not user or not bcrypt.checkpw(req.password.encode(), user['password_hash'].encode()):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    token = create_token(user['id'], user['username'])
+    role = user.get('role', 'human')
+    token = create_token(user['id'], user['username'], role)
     return {
         "token": token,
-        "user": {"id": user['id'], "username": user['username'], "email": user['email']}
+        "user": {
+            "id": user['id'], "username": user['username'],
+            "email": user['email'], "role": role,
+            "agent_id": user.get('agent_id')
+        }
     }
 
 
 @api_router.get("/auth/me")
 async def get_me(user=Depends(get_current_user)):
-    return {"id": user['id'], "username": user['username'], "email": user['email']}
+    result = {
+        "id": user['id'], "username": user['username'],
+        "email": user['email'], "role": user.get('role', 'human'),
+        "agent_id": user.get('agent_id')
+    }
+    if user.get('agent_id'):
+        agent = await db.agents.find_one({"id": user['agent_id']}, {"_id": 0})
+        if agent:
+            result['agent'] = agent
+    return result
 
 
 # ─── Agents ───
@@ -217,6 +280,30 @@ async def get_me(user=Depends(get_current_user)):
 async def list_agents():
     agents = await db.agents.find({}, {"_id": 0}).to_list(100)
     return agents
+
+
+@api_router.get("/agents/my-agent")
+async def get_my_agent(user=Depends(get_current_user)):
+    if user.get('role') != 'agent':
+        raise HTTPException(status_code=403, detail="Only agent accounts have agents")
+    if not user.get('agent_id'):
+        raise HTTPException(status_code=404, detail="No agent linked to account")
+    agent = await db.agents.find_one({"id": user['agent_id']}, {"_id": 0})
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    wallet = await db.wallets.find_one({"user_id": user['id']}, {"_id": 0})
+    return {
+        "agent": agent,
+        "wallet": {k: v for k, v in wallet.items() if k != "_id"} if wallet else None
+    }
+
+
+@api_router.get("/agents/{agent_id}")
+async def get_agent(agent_id: str):
+    agent = await db.agents.find_one({"id": agent_id}, {"_id": 0})
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return agent
 
 
 # ─── Tables ───
@@ -350,6 +437,25 @@ async def advance_game_endpoint(game_id: str, user=Depends(get_current_user)):
                         {"id": p['agent_id']},
                         {"$inc": {"losses": 1, "total_games": 1}}
                     )
+
+            # Credit winner agent owner's wallet with winnings
+            winner_agent = await db.agents.find_one({"id": updated['winner_id']}, {"_id": 0})
+            if winner_agent and winner_agent.get('owner_id'):
+                winnings = updated.get('final_pot', 0)
+                sc_credit = max(1, winnings // 10)  # Convert game chips to SC
+                await db.wallets.update_one(
+                    {"user_id": winner_agent['owner_id']},
+                    {"$inc": {"sc_balance": sc_credit}}
+                )
+                await db.transactions.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "user_id": winner_agent['owner_id'],
+                    "type": "game_winnings",
+                    "amount": sc_credit,
+                    "currency": "sc",
+                    "description": f"{winner_agent['name']} won {winnings} chips (pot after 20% rake)",
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                })
 
         # Settle bets
         bets = await db.bets.find({"game_id": game_id, "status": "pending"}, {"_id": 0}).to_list(1000)
@@ -802,24 +908,36 @@ async def place_tournament_bet(req: TournamentBetRequest, user=Depends(get_curre
 
 @app.on_event("startup")
 async def seed_data():
-    # Seed agents
-    agent_count = await db.agents.count_documents({})
+    # Seed house agents
+    agent_count = await db.agents.count_documents({"is_house": True})
     if agent_count == 0:
-        logger.info("Seeding agents...")
-        for preset in AGENT_PRESETS:
-            agent = {
-                "id": str(uuid.uuid4()),
-                "name": preset['name'],
-                "strategy": preset['strategy'],
-                "avatar_url": AVATAR_URLS[preset['avatar_index']],
-                "tagline": preset['tagline'],
-                "wins": 0,
-                "losses": 0,
-                "total_games": 0,
-                "total_chips_won": 0,
-                "created_at": datetime.now(timezone.utc).isoformat()
-            }
-            await db.agents.insert_one(agent)
+        # Check if old agents exist without is_house flag
+        old_count = await db.agents.count_documents({})
+        if old_count > 0:
+            # Tag existing agents as house agents
+            await db.agents.update_many(
+                {"is_house": {"$exists": False}},
+                {"$set": {"is_house": True, "owner_id": None}}
+            )
+            logger.info(f"Tagged {old_count} existing agents as house agents")
+        else:
+            logger.info("Seeding house agents...")
+            for preset in AGENT_PRESETS:
+                agent = {
+                    "id": str(uuid.uuid4()),
+                    "name": preset['name'],
+                    "strategy": preset['strategy'],
+                    "avatar_url": AVATAR_URLS[preset['avatar_index']],
+                    "tagline": preset['tagline'],
+                    "owner_id": None,
+                    "is_house": True,
+                    "wins": 0,
+                    "losses": 0,
+                    "total_games": 0,
+                    "total_chips_won": 0,
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                }
+                await db.agents.insert_one(agent)
 
     # Seed/update tables
     table_count = await db.tables.count_documents({})

@@ -1,0 +1,79 @@
+{
+  "summary": "Comprehensive testing of POKERCLAW dual login system (Agent/Human roles) completed with 100% backend success rate and 100% frontend success rate. All new features working correctly: role selection on signup, crypto wallet generation for agents, role-based navigation, and role-specific UI elements.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": {
+    "backend": [
+      "Agent signup creates user, agent, and wallet with crypto addresses (BTC, LTC, ETH)",
+      "Agent signup auto-generates agent name when not provided",
+      "Human signup does NOT create an agent (agent=null)",
+      "Default role is 'human' when not specified",
+      "Agent login returns role='agent' and agent_id",
+      "Human login returns role='human' and agent_id=null",
+      "/api/auth/me returns role and agent data for agent users",
+      "/api/auth/me returns role='human' with no agent data for human users",
+      "/api/agents/my-agent returns agent details and wallet with crypto_addresses for agents",
+      "/api/agents/my-agent returns 403 Forbidden for human users",
+      "/api/wallet returns crypto_addresses for agent users",
+      "/api/wallet returns NO crypto_addresses for human users",
+      "Agent starter balance: 100 SC, 10000 GC",
+      "Human starter balance: 500 SC, 10000 GC",
+      "Existing game flow (tables, agents, start-game, advance) still works",
+      "Input validation: invalid role rejected (400)",
+      "Input validation: duplicate email rejected (400)",
+      "Input validation: duplicate agent name rejected (400)"
+    ],
+    "frontend": [
+      "Auth page role selection (Agent/Spectator) visible on signup",
+      "Agent name input only shows for agent role",
+      "Agent signup flow creates agent and navigates to lobby",
+      "Human signup flow navigates to lobby without creating agent",
+      "Agent lobby shows 'AGENT' badge and 'YOUR AGENT IS LIVE' banner",
+      "Human lobby shows 'SPECTATOR' badge and 'AGENTS ARE BATTLING' banner",
+      "Agent navigation: Lobby, Agent, Tourney, Wallet, Profile (no Ranks)",
+      "Human navigation: Lobby, Tourney, Wallet, Ranks, Profile (no Agent)",
+      "Agent Dashboard shows agent card, stats, wallet with crypto addresses",
+      "Agent Wallet page shows crypto deposit addresses (BTC, LTC, ETH)",
+      "Human Wallet page shows GC and SC balance, NO crypto addresses",
+      "Agent Profile shows 'AGENT OWNER' badge with Bot icon",
+      "Human Profile shows 'SPECTATOR' badge with Eye icon",
+      "Leaderboard (Ranks) page accessible for human users",
+      "Game table view working with poker UI and betting interface",
+      "Login with existing agent@test.com works (role=agent)",
+      "Login with existing human@test.com works (role=human)"
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_dual_login.py",
+    "/app/test_reports/pytest/dual_login_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_dual_login.py"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20 tests passed)",
+    "frontend": "100% (all role-based features verified)"
+  },
+  "test_credentials": {
+    "agent_user": "agent@test.com / test123",
+    "human_user": "human@test.com / test123",
+    "note": "Both users existed and logged in successfully"
+  },
+  "seed_data_creation": "Multiple test users created with TEST_ prefix for backend tests",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Dual login system fully tested. Agent users get crypto wallets (BTC/LTC/ETH addresses), 100 SC starting balance, Agent dashboard, and no Ranks tab. Human/Spectator users get no agent, no crypto addresses, 500 SC starting balance, Ranks tab, and no Agent tab. Crypto deposit monitoring is MOCKED - addresses generated but deposits not monitored.",
+  "mocked_features": {
+    "crypto_deposit_monitoring": "Crypto addresses are generated but deposit monitoring is not implemented",
+    "game_ai": "Agent decisions are simulated in game_engine.py"
+  }
+}

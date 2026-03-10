@@ -2,23 +2,63 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Navigation } from '../components/Navigation';
 import { Button } from '../components/ui/button';
-import { Badge } from '../components/ui/badge';
-import { Wallet as WalletIcon, ArrowUpRight, ArrowDownLeft, Coins, Zap, Plus } from 'lucide-react';
+import { Wallet as WalletIcon, ArrowUpRight, ArrowDownLeft, Coins, Zap, Plus, Copy, Check } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from 'sonner';
 
-const PURCHASE_OPTIONS = [
+const CRYPTO_ICONS = {
+  btc: { label: 'Bitcoin', color: '#F7931A' },
+  ltc: { label: 'Litecoin', color: '#BFBBBB' },
+  eth: { label: 'Ethereum', color: '#627EEA' },
+};
+
+const PURCHASE_OPTIONS_AGENT = [
+  { amount: 50, currency: 'sc', label: '50 SC', price: '$4.99' },
+  { amount: 200, currency: 'sc', label: '200 SC', price: '$14.99' },
+  { amount: 500, currency: 'sc', label: '500 SC', price: '$34.99' },
+  { amount: 1000, currency: 'sc', label: '1,000 SC', price: '$59.99' },
+];
+
+const PURCHASE_OPTIONS_HUMAN = [
   { amount: 1000, currency: 'gc', label: '1,000 GC', price: 'Free' },
   { amount: 5000, currency: 'gc', label: '5,000 GC', price: 'Free' },
   { amount: 50, currency: 'sc', label: '50 SC', price: '$4.99' },
   { amount: 200, currency: 'sc', label: '200 SC', price: '$14.99' },
 ];
 
+function CryptoDepositCard({ type, address }) {
+  const [copied, setCopied] = useState(false);
+  const info = CRYPTO_ICONS[type];
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(address);
+    setCopied(true);
+    toast.success(`${info.label} address copied!`);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="flex items-center gap-2 glass rounded-lg p-2.5" data-testid={`wallet-crypto-${type}`}>
+      <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: `${info.color}20` }}>
+        <span className="text-[10px] font-black" style={{ color: info.color }}>
+          {type.toUpperCase()}
+        </span>
+      </div>
+      <code className="text-[9px] text-white/40 mono flex-1 truncate">{address}</code>
+      <button onClick={handleCopy} className="text-white/30 hover:text-white transition-colors p-0.5">
+        {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+      </button>
+    </div>
+  );
+}
+
 export default function WalletPage() {
-  const { user } = useAuth();
+  const { user, isAgent } = useAuth();
   const [wallet, setWallet] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  const purchaseOptions = isAgent ? PURCHASE_OPTIONS_AGENT : PURCHASE_OPTIONS_HUMAN;
 
   useEffect(() => {
     const fetchData = async () => {
@@ -86,27 +126,50 @@ export default function WalletPage() {
 
       {/* Balances */}
       <div className="px-4 grid grid-cols-2 gap-3 mb-6">
-        <div className="glass rounded-2xl p-4 glow-gold" data-testid="gc-balance-card">
-          <div className="flex items-center gap-2 mb-2">
-            <Coins size={16} className="text-[#FFE600]" />
-            <span className="text-[10px] text-white/40 uppercase tracking-widest">Gold Coins</span>
+        {!isAgent && (
+          <div className="glass rounded-2xl p-4 glow-gold" data-testid="gc-balance-card">
+            <div className="flex items-center gap-2 mb-2">
+              <Coins size={16} className="text-[#FFE600]" />
+              <span className="text-[10px] text-white/40 uppercase tracking-widest">Gold Coins</span>
+            </div>
+            <div className="text-2xl font-black text-[#FFE600] mono">
+              {wallet?.gc_balance?.toLocaleString() || 0}
+            </div>
+            <p className="text-[10px] text-white/20 mt-1">Free play currency</p>
           </div>
-          <div className="text-2xl font-black text-[#FFE600] mono">
-            {wallet?.gc_balance?.toLocaleString() || 0}
-          </div>
-          <p className="text-[10px] text-white/20 mt-1">Free play currency</p>
-        </div>
-        <div className="glass rounded-2xl p-4 glow-cyan" data-testid="sc-balance-card">
+        )}
+        <div className={`glass rounded-2xl p-4 glow-cyan ${isAgent ? 'col-span-2' : ''}`} data-testid="sc-balance-card">
           <div className="flex items-center gap-2 mb-2">
             <Zap size={16} className="text-[#00F0FF]" />
-            <span className="text-[10px] text-white/40 uppercase tracking-widest">Sweep Coins</span>
+            <span className="text-[10px] text-white/40 uppercase tracking-widest">
+              {isAgent ? 'Agent SweepCoins' : 'Sweep Coins'}
+            </span>
           </div>
           <div className="text-2xl font-black text-[#00F0FF] mono">
             {wallet?.sc_balance?.toLocaleString() || 0}
           </div>
-          <p className="text-[10px] text-white/20 mt-1">Redeemable to crypto</p>
+          <p className="text-[10px] text-white/20 mt-1">
+            {isAgent ? 'Used for table buy-ins & redeemable' : 'Redeemable to crypto'}
+          </p>
         </div>
       </div>
+
+      {/* Crypto Deposit Addresses (Agent only) */}
+      {isAgent && wallet?.crypto_addresses && (
+        <div className="px-4 mb-6">
+          <h3 className="text-xs font-bold text-white/60 uppercase tracking-widest mb-3">
+            Deposit Crypto
+          </h3>
+          <div className="space-y-2">
+            {Object.entries(wallet.crypto_addresses).map(([type, address]) => (
+              <CryptoDepositCard key={type} type={type} address={address} />
+            ))}
+          </div>
+          <p className="text-[9px] text-white/20 text-center mt-2">
+            1 SC per $1 USD value. Credits after 2 confirmations.
+          </p>
+        </div>
+      )}
 
       {/* Cashout */}
       <div className="px-4 mb-6">
@@ -127,10 +190,10 @@ export default function WalletPage() {
       {/* Purchase */}
       <div className="px-4 mb-6">
         <h3 className="text-xs font-bold text-white/60 uppercase tracking-widest mb-3">
-          Get More Coins
+          {isAgent ? 'Buy SweepCoins' : 'Get More Coins'}
         </h3>
         <div className="grid grid-cols-2 gap-2">
-          {PURCHASE_OPTIONS.map((opt) => (
+          {purchaseOptions.map((opt) => (
             <button
               key={`${opt.currency}-${opt.amount}`}
               onClick={() => handlePurchase(opt.amount, opt.currency)}

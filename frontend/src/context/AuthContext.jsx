@@ -34,8 +34,10 @@ export function AuthProvider({ children }) {
     return res.data;
   };
 
-  const signup = async (username, email, password) => {
-    const res = await api.post('/auth/signup', { username, email, password });
+  const signup = async (username, email, password, role = 'human', agentName = null) => {
+    const payload = { username, email, password, role };
+    if (agentName) payload.agent_name = agentName;
+    const res = await api.post('/auth/signup', payload);
     localStorage.setItem('pokerclaw_token', res.data.token);
     setUser(res.data.user);
     return res.data;
@@ -46,8 +48,11 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
+  const isAgent = user?.role === 'agent';
+  const isHuman = user?.role === 'human' || (!user?.role);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, signup, logout, isAgent, isHuman }}>
       {children}
     </AuthContext.Provider>
   );

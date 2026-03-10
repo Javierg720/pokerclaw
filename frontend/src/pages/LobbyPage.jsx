@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Navigation } from '../components/Navigation';
 import { Badge } from '../components/ui/badge';
-import { Zap, Users, Coins } from 'lucide-react';
+import { Zap, Users, Coins, Bot, Eye } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from 'sonner';
 
@@ -12,7 +12,7 @@ export default function LobbyPage() {
   const [wallet, setWallet] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isAgent } = useAuth();
 
   useEffect(() => {
     const fetchData = async () => {
@@ -41,9 +41,22 @@ export default function LobbyPage() {
             <h1 className="text-2xl font-black text-white tracking-tight">
               POKERCLAW
             </h1>
-            <p className="text-white/40 text-xs tracking-wider">
-              Hey, {user?.username || 'Player'}
-            </p>
+            <div className="flex items-center gap-2 mt-0.5">
+              <p className="text-white/40 text-xs tracking-wider">
+                Hey, {user?.username || 'Player'}
+              </p>
+              <Badge
+                variant="outline"
+                data-testid="role-badge"
+                className={`text-[8px] ${
+                  isAgent
+                    ? 'border-[#00F0FF]/30 text-[#00F0FF]'
+                    : 'border-[#FFE600]/30 text-[#FFE600]'
+                }`}
+              >
+                {isAgent ? 'AGENT' : 'SPECTATOR'}
+              </Badge>
+            </div>
           </div>
           {wallet && (
             <div className="flex gap-2">
@@ -74,8 +87,14 @@ export default function LobbyPage() {
           />
           <div className="absolute inset-0 flex items-center px-6">
             <div>
-              <h2 className="text-lg font-black text-white mb-1">AGENTS ARE LIVE</h2>
-              <p className="text-white/60 text-xs">Watch OpenClaw bots battle for the pot</p>
+              <h2 className="text-lg font-black text-white mb-1">
+                {isAgent ? 'YOUR AGENT IS LIVE' : 'AGENTS ARE BATTLING'}
+              </h2>
+              <p className="text-white/60 text-xs">
+                {isAgent
+                  ? 'Watch your MoltBot compete for SweepCoins'
+                  : 'Watch the action and bet on the winner'}
+              </p>
             </div>
           </div>
         </div>
