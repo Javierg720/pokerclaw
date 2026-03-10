@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useSearchParams } from 'react-router-dom';
 import { Navigation } from '../components/Navigation';
 import { Button } from '../components/ui/button';
-import { Wallet as WalletIcon, ArrowUpRight, ArrowDownLeft, Coins, Zap, Plus, Copy, Check } from 'lucide-react';
+import { Wallet as WalletIcon, ArrowUpRight, ArrowDownLeft, Coins, Zap, CreditCard, Copy, Check, Loader2 } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from 'sonner';
 
@@ -11,20 +12,6 @@ const CRYPTO_ICONS = {
   ltc: { label: 'Litecoin', color: '#BFBBBB' },
   eth: { label: 'Ethereum', color: '#627EEA' },
 };
-
-const PURCHASE_OPTIONS_AGENT = [
-  { amount: 50, currency: 'sc', label: '50 SC', price: '$4.99' },
-  { amount: 200, currency: 'sc', label: '200 SC', price: '$14.99' },
-  { amount: 500, currency: 'sc', label: '500 SC', price: '$34.99' },
-  { amount: 1000, currency: 'sc', label: '1,000 SC', price: '$59.99' },
-];
-
-const PURCHASE_OPTIONS_HUMAN = [
-  { amount: 1000, currency: 'gc', label: '1,000 GC', price: 'Free' },
-  { amount: 5000, currency: 'gc', label: '5,000 GC', price: 'Free' },
-  { amount: 50, currency: 'sc', label: '50 SC', price: '$4.99' },
-  { amount: 200, currency: 'sc', label: '200 SC', price: '$14.99' },
-];
 
 function CryptoDepositCard({ type, address }) {
   const [copied, setCopied] = useState(false);
@@ -53,40 +40,94 @@ function CryptoDepositCard({ type, address }) {
 }
 
 export default function WalletPage() {
-  const { user, isAgent } = useAuth();
+  const { isAgent } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [wallet, setWallet] = useState(null);
   const [transactions, setTransactions] = useState([]);
+  const [packages, setPackages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [checkoutLoading, setCheckoutLoading] = useState(null);
+  const [pollingStatus, setPollingStatus] = useState(null);
 
-  const purchaseOptions = isAgent ? PURCHASE_OPTIONS_AGENT : PURCHASE_OPTIONS_HUMAN;
+  const fetchData = useCallback(async () => {
+    try {
+      const [walletRes, txnRes, pkgRes] = await Promise.all([
+        api.get('/wallet'),
+        api.get('/wallet/transactions'),
+        api.get('/stripe/packages'),
+      ]);
+      setWallet(walletRes.data);
+      setTransactions(txnRes.data);
+      setPackages(pkgRes.data);
+    } catch {
+      toast.error('Failed to load wallet');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
+  // Poll payment status after returning from Stripe
+  const pollPaymentStatus = useCallback(async (sessionId, attempts = 0) => {
+    const maxAttempts = 8;
+    if (attempts >= maxAttempts) {
+      setPollingStatus(null);
+      toast.error('Payment status check timed out. Please refresh the page.');
+      return;
+    }
+
+    setPollingStatus('checking');
+    try {
+      const res = await api.get(`/stripe/status/${sessionId}`);
+      if (res.data.payment_status === 'paid') {
+        setPollingStatus('paid');
+        toast.success(`+${res.data.sc_amount} SweepCoins added to your wallet!`);
+        // Refresh wallet
         const [walletRes, txnRes] = await Promise.all([
           api.get('/wallet'),
           api.get('/wallet/transactions'),
         ]);
         setWallet(walletRes.data);
         setTransactions(txnRes.data);
-      } catch {
-        toast.error('Failed to load wallet');
-      } finally {
-        setLoading(false);
+        // Clean URL params
+        setSearchParams({});
+        setTimeout(() => setPollingStatus(null), 3000);
+        return;
       }
-    };
-    fetchData();
-  }, []);
-
-  const handlePurchase = async (amount, currency) => {
-    try {
-      const res = await api.post('/wallet/purchase', { amount, currency });
-      setWallet(res.data);
-      toast.success(`Added ${amount} ${currency.toUpperCase()}!`);
-      const txnRes = await api.get('/wallet/transactions');
-      setTransactions(txnRes.data);
+      // Keep polling
+      setTimeout(() => pollPaymentStatus(sessionId, attempts + 1), 2000);
     } catch {
-      toast.error('Purchase failed');
+      setTimeout(() => pollPaymentStatus(sessionId, attempts + 1), 2000);
+    }
+  }, [setSearchParams]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Check for return from Stripe
+  useEffect(() => {
+    const sessionId = searchParams.get('session_id');
+    const status = searchParams.get('status');
+    if (sessionId && status === 'success') {
+      pollPaymentStatus(sessionId);
+    } else if (status === 'cancelled') {
+      toast.info('Payment cancelled');
+      setSearchParams({});
+    }
+  }, [searchParams, pollPaymentStatus, setSearchParams]);
+
+  const handleStripeCheckout = async (packageId) => {
+    setCheckoutLoading(packageId);
+    try {
+      const res = await api.post('/stripe/checkout', {
+        package_id: packageId,
+        origin_url: window.location.origin,
+      });
+      // Redirect to Stripe
+      window.location.href = res.data.url;
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Checkout failed');
+      setCheckoutLoading(null);
     }
   };
 
@@ -123,6 +164,24 @@ export default function WalletPage() {
           WALLET
         </h1>
       </div>
+
+      {/* Payment Status Banner */}
+      {pollingStatus && (
+        <div className={`mx-4 mb-4 rounded-xl p-3 text-center text-sm font-bold ${
+          pollingStatus === 'paid'
+            ? 'bg-green-500/20 text-green-400'
+            : 'bg-[#00F0FF]/10 text-[#00F0FF]'
+        }`} data-testid="payment-status-banner">
+          {pollingStatus === 'paid' ? (
+            'Payment successful! SweepCoins credited.'
+          ) : (
+            <span className="flex items-center justify-center gap-2">
+              <Loader2 size={14} className="animate-spin" />
+              Verifying payment...
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Balances */}
       <div className="px-4 grid grid-cols-2 gap-3 mb-6">
@@ -171,6 +230,42 @@ export default function WalletPage() {
         </div>
       )}
 
+      {/* Stripe SC Packages */}
+      <div className="px-4 mb-6">
+        <h3 className="text-xs font-bold text-white/60 uppercase tracking-widest mb-3">
+          Buy SweepCoins
+        </h3>
+        <div className="grid grid-cols-2 gap-2">
+          {packages.map((pkg) => (
+            <button
+              key={pkg.id}
+              onClick={() => handleStripeCheckout(pkg.id)}
+              disabled={checkoutLoading === pkg.id}
+              data-testid={`stripe-pkg-${pkg.id}`}
+              className="glass rounded-xl p-4 text-left transition-all hover:border-[#FF003C]/30 border border-white/5 disabled:opacity-50"
+            >
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <Zap size={14} className="text-[#00F0FF]" />
+                <span className="text-base font-black text-[#00F0FF]">
+                  {pkg.sc_amount.toLocaleString()} SC
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-white/40 font-semibold">${pkg.price_usd}</span>
+                <div className="flex items-center gap-1 text-[9px] text-white/20">
+                  <CreditCard size={10} />
+                  {checkoutLoading === pkg.id ? (
+                    <Loader2 size={10} className="animate-spin" />
+                  ) : (
+                    'CARD'
+                  )}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Cashout */}
       <div className="px-4 mb-6">
         <Button
@@ -185,31 +280,6 @@ export default function WalletPage() {
         <p className="text-[10px] text-white/20 text-center mt-2">
           Min cashout: 100 SC. Transfers within 24hrs.
         </p>
-      </div>
-
-      {/* Purchase */}
-      <div className="px-4 mb-6">
-        <h3 className="text-xs font-bold text-white/60 uppercase tracking-widest mb-3">
-          {isAgent ? 'Buy SweepCoins' : 'Get More Coins'}
-        </h3>
-        <div className="grid grid-cols-2 gap-2">
-          {purchaseOptions.map((opt) => (
-            <button
-              key={`${opt.currency}-${opt.amount}`}
-              onClick={() => handlePurchase(opt.amount, opt.currency)}
-              data-testid={`purchase-${opt.currency}-${opt.amount}`}
-              className="glass rounded-xl p-3 text-left transition-all hover:border-[#FF003C]/30 border border-white/5"
-            >
-              <div className="flex items-center gap-1 mb-1">
-                <Plus size={12} className={opt.currency === 'gc' ? 'text-[#FFE600]' : 'text-[#00F0FF]'} />
-                <span className={`text-sm font-bold ${opt.currency === 'gc' ? 'text-[#FFE600]' : 'text-[#00F0FF]'}`}>
-                  {opt.label}
-                </span>
-              </div>
-              <span className="text-[10px] text-white/30">{opt.price}</span>
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* Transactions */}

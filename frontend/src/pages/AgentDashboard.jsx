@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import { Navigation } from '../components/Navigation';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -135,6 +136,7 @@ function getTimeAgo(dateStr) {
 
 export default function AgentDashboard() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [agentData, setAgentData] = useState(null);
   const [activity, setActivity] = useState([]);
   const [earnings, setEarnings] = useState([]);
@@ -320,13 +322,13 @@ export default function AgentDashboard() {
             )}
           </div>
 
-          {/* Stripe button placeholder */}
+          {/* Buy SC button */}
           <Button
-            disabled
+            onClick={() => navigate('/wallet')}
             data-testid="buy-sc-stripe-btn"
-            className="w-full bg-gradient-to-r from-[#00F0FF] to-[#BD00FF] text-black font-bold rounded-xl py-3 disabled:opacity-40"
+            className="w-full bg-gradient-to-r from-[#00F0FF] to-[#BD00FF] text-black font-bold rounded-xl py-3"
           >
-            BUY SC WITH CARD (COMING SOON)
+            BUY SWEEPCOINS
           </Button>
         </div>
       ) : (

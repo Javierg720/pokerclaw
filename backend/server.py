@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -17,6 +17,9 @@ from datetime import datetime, timezone
 from game_engine import (
     create_deck, advance_game, best_hand,
     AGENT_PRESETS, AVATAR_URLS, STRATEGIES
+)
+from emergentintegrations.payments.stripe.checkout import (
+    StripeCheckout, CheckoutSessionRequest, CheckoutSessionResponse, CheckoutStatusResponse
 )
 
 ROOT_DIR = Path(__file__).parent
@@ -147,6 +150,18 @@ class TournamentBetRequest(BaseModel):
     agent_id: str
     amount: int
     currency: str = "gc"
+
+class StripeCheckoutRequest(BaseModel):
+    package_id: str
+    origin_url: str
+
+# Fixed SC purchase packages (amounts defined server-side only)
+SC_PACKAGES = {
+    "sc_50": {"sc_amount": 50, "price_usd": 4.99, "label": "50 SweepCoins"},
+    "sc_200": {"sc_amount": 200, "price_usd": 14.99, "label": "200 SweepCoins"},
+    "sc_500": {"sc_amount": 500, "price_usd": 34.99, "label": "500 SweepCoins"},
+    "sc_1000": {"sc_amount": 1000, "price_usd": 59.99, "label": "1,000 SweepCoins"},
+}
 
 
 # ─── Auth ───
@@ -666,6 +681,170 @@ async def get_transactions(user=Depends(get_current_user)):
         {"user_id": user['id']}, {"_id": 0}
     ).sort("created_at", -1).to_list(100)
     return txns
+
+
+# ─── Stripe Checkout ───
+
+@api_router.get("/stripe/packages")
+async def get_stripe_packages():
+    return [
+        {"id": k, "sc_amount": v["sc_amount"], "price_usd": v["price_usd"], "label": v["label"]}
+        for k, v in SC_PACKAGES.items()
+    ]
+
+
+@api_router.post("/stripe/checkout")
+async def create_stripe_checkout(req: StripeCheckoutRequest, http_request: Request, user=Depends(get_current_user)):
+    pkg = SC_PACKAGES.get(req.package_id)
+    if not pkg:
+        raise HTTPException(status_code=400, detail="Invalid package")
+
+    stripe_key = os.environ.get("STRIPE_API_KEY")
+    if not stripe_key:
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+
+    host_url = str(http_request.base_url).rstrip("/")
+    webhook_url = f"{host_url}/api/webhook/stripe"
+    stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url=webhook_url)
+
+    origin = req.origin_url.rstrip("/")
+    success_url = f"{origin}/wallet?session_id={{CHECKOUT_SESSION_ID}}&status=success"
+    cancel_url = f"{origin}/wallet?status=cancelled"
+
+    metadata = {
+        "user_id": user["id"],
+        "username": user.get("username", ""),
+        "package_id": req.package_id,
+        "sc_amount": str(pkg["sc_amount"]),
+    }
+
+    checkout_req = CheckoutSessionRequest(
+        amount=float(pkg["price_usd"]),
+        currency="usd",
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata=metadata,
+    )
+
+    session = await stripe_checkout.create_checkout_session(checkout_req)
+
+    # Record payment transaction as pending
+    await db.payment_transactions.insert_one({
+        "id": str(uuid.uuid4()),
+        "session_id": session.session_id,
+        "user_id": user["id"],
+        "package_id": req.package_id,
+        "sc_amount": pkg["sc_amount"],
+        "amount_usd": pkg["price_usd"],
+        "payment_status": "pending",
+        "status": "initiated",
+        "metadata": metadata,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+    })
+
+    return {"url": session.url, "session_id": session.session_id}
+
+
+@api_router.get("/stripe/status/{session_id}")
+async def get_stripe_status(session_id: str, user=Depends(get_current_user)):
+    stripe_key = os.environ.get("STRIPE_API_KEY")
+    if not stripe_key:
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+
+    stripe_checkout = StripeCheckout(api_key=stripe_key)
+    status = await stripe_checkout.get_checkout_status(session_id)
+
+    # Find the payment transaction
+    pt = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
+    if not pt:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    # Only process if not already completed
+    if pt["payment_status"] != "paid" and status.payment_status == "paid":
+        sc_amount = pt["sc_amount"]
+        await db.wallets.update_one(
+            {"user_id": pt["user_id"]},
+            {"$inc": {"sc_balance": sc_amount}}
+        )
+        await db.payment_transactions.update_one(
+            {"session_id": session_id},
+            {"$set": {
+                "payment_status": "paid",
+                "status": "complete",
+                "completed_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        await db.transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "user_id": pt["user_id"],
+            "type": "stripe_purchase",
+            "amount": sc_amount,
+            "currency": "sc",
+            "description": f"Purchased {sc_amount} SC via Stripe (${pt['amount_usd']})",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+    elif status.payment_status != "paid":
+        await db.payment_transactions.update_one(
+            {"session_id": session_id},
+            {"$set": {"payment_status": status.payment_status, "status": status.status}}
+        )
+
+    return {
+        "status": status.status,
+        "payment_status": status.payment_status,
+        "sc_amount": pt["sc_amount"],
+        "amount_usd": pt["amount_usd"],
+    }
+
+
+# ─── Stripe Webhook ───
+
+@app.post("/api/webhook/stripe")
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    sig = request.headers.get("Stripe-Signature")
+
+    stripe_key = os.environ.get("STRIPE_API_KEY")
+    if not stripe_key:
+        return {"status": "error", "message": "Stripe not configured"}
+
+    stripe_checkout = StripeCheckout(api_key=stripe_key)
+
+    try:
+        event = await stripe_checkout.handle_webhook(payload, sig)
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return {"status": "error"}
+
+    if event.event_type == "checkout.session.completed" and event.payment_status == "paid":
+        session_id = event.session_id
+        pt = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
+        if pt and pt["payment_status"] != "paid":
+            sc_amount = pt["sc_amount"]
+            await db.wallets.update_one(
+                {"user_id": pt["user_id"]},
+                {"$inc": {"sc_balance": sc_amount}}
+            )
+            await db.payment_transactions.update_one(
+                {"session_id": session_id},
+                {"$set": {
+                    "payment_status": "paid",
+                    "status": "complete",
+                    "completed_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+            await db.transactions.insert_one({
+                "id": str(uuid.uuid4()),
+                "user_id": pt["user_id"],
+                "type": "stripe_purchase",
+                "amount": sc_amount,
+                "currency": "sc",
+                "description": f"Purchased {sc_amount} SC via Stripe (${pt['amount_usd']})",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+
+    return {"status": "ok"}
 
 
 # ─── Leaderboard ───
