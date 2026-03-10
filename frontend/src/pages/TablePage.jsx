@@ -19,8 +19,57 @@ const PHASE_LABELS = {
   complete: 'Complete',
 };
 
+/* ── Layout configs ── */
+const SEAT_LAYOUTS = {
+  4: [
+    { cell: 'topCenter', idx: 0 },
+    { cell: 'midRight', idx: 1 },
+    { cell: 'botCenter', idx: 2 },
+    { cell: 'midLeft', idx: 3 },
+  ],
+  5: [
+    { cell: 'topLeft', idx: 0 },
+    { cell: 'topRight', idx: 1 },
+    { cell: 'midRight', idx: 2 },
+    { cell: 'botCenter', idx: 3 },
+    { cell: 'midLeft', idx: 4 },
+  ],
+  6: [
+    { cell: 'topLeft', idx: 0 },
+    { cell: 'topRight', idx: 1 },
+    { cell: 'midRight', idx: 2 },
+    { cell: 'botRight', idx: 3 },
+    { cell: 'botLeft', idx: 4 },
+    { cell: 'midLeft', idx: 5 },
+  ],
+};
+
+const DEAL_DIRS = {
+  topLeft: { x: 55, y: 55 },
+  topCenter: { x: 0, y: 60 },
+  topRight: { x: -55, y: 55 },
+  midLeft: { x: 65, y: 0 },
+  midRight: { x: -65, y: 0 },
+  botLeft: { x: 55, y: -55 },
+  botCenter: { x: 0, y: -60 },
+  botRight: { x: -55, y: -55 },
+};
+
+const CHIP_DIRS = {
+  topLeft: { x: -55, y: -50 },
+  topCenter: { x: 0, y: -60 },
+  topRight: { x: 55, y: -50 },
+  midLeft: { x: -70, y: 0 },
+  midRight: { x: 70, y: 0 },
+  botLeft: { x: -55, y: 50 },
+  botCenter: { x: 0, y: 60 },
+  botRight: { x: 55, y: 50 },
+};
+
+const BOT_CELLS = new Set(['botLeft', 'botCenter', 'botRight']);
+
 /* ── Seat component ── */
-function SeatPlayer({ player, showCards, isWinner, reversed }) {
+function SeatPlayer({ player, showCards, isWinner, reversed, dealFrom }) {
   const ringClass = player.folded
     ? 'agent-ring-folded'
     : isWinner
@@ -57,13 +106,13 @@ function SeatPlayer({ player, showCards, isWinner, reversed }) {
     <div className="flex gap-0.5 justify-center" data-testid={`seat-cards-${player.agent_id}`}>
       {showCards && player.hole_cards?.[0] ? (
         <>
-          <PlayingCard card={player.hole_cards[0]} size="xs" delay={0} />
-          <PlayingCard card={player.hole_cards[1]} size="xs" delay={60} />
+          <PlayingCard card={player.hole_cards[0]} size="xs" delay={0} dealFrom={dealFrom} />
+          <PlayingCard card={player.hole_cards[1]} size="xs" delay={80} dealFrom={dealFrom} />
         </>
       ) : (
         <>
-          <PlayingCard card={null} size="xs" />
-          <PlayingCard card={null} size="xs" />
+          <PlayingCard card={null} size="xs" delay={0} dealFrom={dealFrom} />
+          <PlayingCard card={null} size="xs" delay={80} dealFrom={dealFrom} />
         </>
       )}
     </div>
@@ -98,45 +147,53 @@ function SeatPlayer({ player, showCards, isWinner, reversed }) {
 function PokerTableVisual({ game, showCards }) {
   const players = game?.players || [];
   const isShowdown = ['showdown', 'complete'].includes(game?.phase);
+  const count = Math.min(Math.max(players.length, 4), 6);
+  const layout = SEAT_LAYOUTS[count] || SEAT_LAYOUTS[4];
 
-  // Positions: 0=top, 1=right, 2=bottom, 3=left
-  // For 5-6 players, add top-left / top-right splits
-  const getPlayers = () => {
-    if (players.length <= 4) return { top: players[0], right: players[1], bottom: players[2], left: players[3] };
-    if (players.length === 5) return { top: players[0], topRight: players[1], right: players[2], bottom: players[3], left: players[4] };
-    return { topLeft: players[0], topRight: players[1], right: players[2], bottomRight: players[3], bottomLeft: players[4], left: players[5] };
+  // Build cell → player mapping
+  const cellMap = {};
+  layout.forEach(({ cell, idx }) => {
+    if (players[idx]) cellMap[cell] = players[idx];
+  });
+
+  // Chip fly data
+  const chipData = layout
+    .filter(({ idx }) => players[idx] && !players[idx].folded && players[idx].total_bet > 0)
+    .map(({ cell, idx }, i) => ({
+      player: players[idx],
+      dir: CHIP_DIRS[cell],
+      delay: i * 80,
+    }));
+
+  const renderSeat = (cellName, className) => {
+    const player = cellMap[cellName];
+    return (
+      <div className={className} key={cellName}>
+        {player && (
+          <SeatPlayer
+            player={player}
+            showCards={showCards}
+            isWinner={isShowdown && game.winner_id === player.agent_id}
+            reversed={BOT_CELLS.has(cellName)}
+            dealFrom={DEAL_DIRS[cellName]}
+          />
+        )}
+      </div>
+    );
   };
-
-  const seats = getPlayers();
 
   return (
     <div className="poker-table-grid" style={{ height: '420px' }} data-testid="poker-table">
       {/* Row 1 - Top */}
-      <div /> {/* top-left empty */}
-      <div className="flex items-end justify-center pb-1">
-        {seats.top && (
-          <SeatPlayer
-            player={seats.top}
-            showCards={showCards}
-            isWinner={isShowdown && game.winner_id === seats.top.agent_id}
-          />
-        )}
-      </div>
-      <div /> {/* top-right empty */}
+      {renderSeat('topLeft', 'flex items-end justify-center pb-1')}
+      {renderSeat('topCenter', 'flex items-end justify-center pb-1')}
+      {renderSeat('topRight', 'flex items-end justify-center pb-1')}
 
-      {/* Row 2 - Middle: Left player | TABLE | Right player */}
-      <div className="flex items-center justify-center">
-        {seats.left && (
-          <SeatPlayer
-            player={seats.left}
-            showCards={showCards}
-            isWinner={isShowdown && game.winner_id === seats.left.agent_id}
-          />
-        )}
-      </div>
+      {/* Row 2 - Middle */}
+      {renderSeat('midLeft', 'flex items-center justify-center')}
 
       {/* THE TABLE FELT */}
-      <div className="poker-felt rounded-[45%] flex flex-col items-center justify-center gap-2 p-2">
+      <div className="poker-felt rounded-[45%] flex flex-col items-center justify-center gap-1.5 p-2">
         {/* Pot */}
         <div className="text-center z-10">
           <span className="text-[10px] text-white/30 uppercase tracking-widest">Pot</span>
@@ -149,51 +206,47 @@ function PokerTableVisual({ game, showCards }) {
         <div className="flex gap-1 justify-center z-10" data-testid="community-cards">
           {[0, 1, 2, 3, 4].map((i) =>
             game?.community_cards?.[i] ? (
-              <PlayingCard key={i} card={game.community_cards[i]} size="sm" delay={i * 80} />
+              <PlayingCard
+                key={`cc-${i}-${game.community_cards[i].rank}-${game.community_cards[i].suit}`}
+                card={game.community_cards[i]}
+                size="sm"
+                delay={i * 120}
+                dealFrom={{ x: 0, y: -40 }}
+              />
             ) : (
               <div
-                key={i}
+                key={`cc-empty-${i}`}
                 className="w-8 h-12 rounded border border-white/[0.06] bg-white/[0.015]"
               />
             )
           )}
         </div>
 
-        {/* Bet chips on table */}
-        <div className="flex gap-2 mt-1 z-10">
-          {players
-            .filter((p) => !p.folded && p.total_bet > 0)
-            .map((p) => (
-              <div key={p.agent_id} className="table-bet-chip chip-bounce">
-                {p.total_bet}
-              </div>
-            ))}
+        {/* Bet chips flying in from seats */}
+        <div className="flex flex-wrap gap-1.5 justify-center mt-0.5 z-10">
+          {chipData.map(({ player, dir, delay }) => (
+            <div
+              key={player.agent_id}
+              className="table-bet-chip chip-fly"
+              style={{
+                '--chip-x': `${dir.x}px`,
+                '--chip-y': `${dir.y}px`,
+                animationDelay: `${delay}ms`,
+              }}
+              data-testid={`chip-${player.agent_id}`}
+            >
+              {player.total_bet}
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="flex items-center justify-center">
-        {seats.right && (
-          <SeatPlayer
-            player={seats.right}
-            showCards={showCards}
-            isWinner={isShowdown && game.winner_id === seats.right.agent_id}
-          />
-        )}
-      </div>
+      {renderSeat('midRight', 'flex items-center justify-center')}
 
       {/* Row 3 - Bottom */}
-      <div /> {/* bottom-left empty */}
-      <div className="flex items-start justify-center pt-1">
-        {seats.bottom && (
-          <SeatPlayer
-            player={seats.bottom}
-            showCards={showCards}
-            isWinner={isShowdown && game.winner_id === seats.bottom.agent_id}
-            reversed
-          />
-        )}
-      </div>
-      <div /> {/* bottom-right empty */}
+      {renderSeat('botLeft', 'flex items-start justify-center pt-1')}
+      {renderSeat('botCenter', 'flex items-start justify-center pt-1')}
+      {renderSeat('botRight', 'flex items-start justify-center pt-1')}
     </div>
   );
 }

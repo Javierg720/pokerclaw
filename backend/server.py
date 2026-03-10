@@ -514,28 +514,45 @@ async def seed_data():
             }
             await db.agents.insert_one(agent)
 
-    # Seed tables
+    # Seed/update tables
     table_count = await db.tables.count_documents({})
-    if table_count == 0:
-        logger.info("Seeding tables...")
-        agents = await db.agents.find({}, {"_id": 0}).to_list(100)
-        agent_ids = [a['id'] for a in agents]
+    agents = await db.agents.find({}, {"_id": 0}).to_list(100)
+    agent_ids = [a['id'] for a in agents]
 
-        tables = [
-            {"id": str(uuid.uuid4()), "name": "The Claw Pit", "min_bet": 10, "max_bet": 500,
-             "agent_ids": agent_ids[:4], "current_game_id": None, "status": "active",
-             "description": "High-stakes action with the fiercest bots"},
-            {"id": str(uuid.uuid4()), "name": "Moltbook Arena", "min_bet": 5, "max_bet": 200,
-             "agent_ids": agent_ids[2:6], "current_game_id": None, "status": "active",
-             "description": "Where legends are born"},
-            {"id": str(uuid.uuid4()), "name": "Deep Stack Den", "min_bet": 20, "max_bet": 1000,
-             "agent_ids": agent_ids[4:8] if len(agent_ids) >= 8 else agent_ids[:4],
-             "current_game_id": None, "status": "active",
-             "description": "Only the deep-pocketed survive"},
-        ]
-        for t in tables:
-            t['created_at'] = datetime.now(timezone.utc).isoformat()
-            await db.tables.insert_one(t)
+    tables_config = [
+        {"name": "The Claw Pit", "min_bet": 10, "max_bet": 500,
+         "agent_slice": (0, 4), "description": "High-stakes action with the fiercest bots"},
+        {"name": "Moltbook Arena", "min_bet": 5, "max_bet": 200,
+         "agent_slice": (0, 5), "description": "5-way battle where legends are born"},
+        {"name": "Deep Stack Den", "min_bet": 20, "max_bet": 1000,
+         "agent_slice": (0, 6), "description": "6-handed deep-pocket showdown"},
+    ]
+
+    for config in tables_config:
+        existing = await db.tables.find_one({"name": config["name"]}, {"_id": 0})
+        target_ids = agent_ids[config["agent_slice"][0]:config["agent_slice"][1]]
+
+        if existing:
+            if len(existing.get("agent_ids", [])) != len(target_ids):
+                await db.tables.update_one(
+                    {"name": config["name"]},
+                    {"$set": {"agent_ids": target_ids, "description": config["description"],
+                              "current_game_id": None}}
+                )
+                logger.info(f"Updated {config['name']} to {len(target_ids)} agents")
+        else:
+            table = {
+                "id": str(uuid.uuid4()),
+                "name": config["name"],
+                "min_bet": config["min_bet"],
+                "max_bet": config["max_bet"],
+                "agent_ids": target_ids,
+                "current_game_id": None,
+                "status": "active",
+                "description": config["description"],
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            await db.tables.insert_one(table)
 
     logger.info("PokerClaw backend ready!")
 

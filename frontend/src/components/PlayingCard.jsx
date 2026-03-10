@@ -12,7 +12,7 @@ const SUIT_COLORS = {
   spades: 'suit-black',
 };
 
-export function PlayingCard({ card, size = 'md', delay = 0 }) {
+export function PlayingCard({ card, size = 'md', delay = 0, dealFrom }) {
   const sizes = {
     xs: 'w-7 h-10 text-[6px]',
     sm: 'w-9 h-[52px] text-[10px]',
@@ -20,11 +20,20 @@ export function PlayingCard({ card, size = 'md', delay = 0 }) {
     lg: 'w-20 h-28 text-lg',
   };
 
+  const animClass = dealFrom ? 'card-deal-dir' : 'card-deal';
+  const style = {
+    animationDelay: `${delay}ms`,
+    ...(dealFrom && {
+      '--deal-x': `${dealFrom.x}px`,
+      '--deal-y': `${dealFrom.y}px`,
+    }),
+  };
+
   if (!card) {
     return (
       <div
-        className={`playing-card playing-card-back ${sizes[size]} card-deal`}
-        style={{ animationDelay: `${delay}ms` }}
+        className={`playing-card playing-card-back ${sizes[size]} ${animClass}`}
+        style={style}
         data-testid="card-back"
       />
     );
@@ -35,8 +44,8 @@ export function PlayingCard({ card, size = 'md', delay = 0 }) {
 
   return (
     <div
-      className={`playing-card playing-card-front ${sizes[size]} card-deal flex flex-col justify-between p-1`}
-      style={{ animationDelay: `${delay}ms` }}
+      className={`playing-card playing-card-front ${sizes[size]} ${animClass} flex flex-col justify-between p-1`}
+      style={style}
       data-testid={`card-${card.rank}-${card.suit}`}
     >
       <div className={`${colorClass} font-bold leading-none`}>

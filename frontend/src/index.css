@@ -147,12 +147,52 @@
 }
 .card-deal { animation: card-deal 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
 
+/* Directional card deal - slides from table center toward seat */
+@keyframes card-deal-dir {
+  0% {
+    opacity: 0;
+    transform: translate(var(--deal-x, 0px), var(--deal-y, 0px)) scale(0.25) rotate(-12deg);
+  }
+  55% {
+    opacity: 1;
+    transform: translate(3px, 3px) scale(1.06) rotate(1deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1) rotate(0);
+  }
+}
+.card-deal-dir {
+  animation: card-deal-dir 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  opacity: 0;
+}
+
 @keyframes chip-bounce {
   0% { transform: translateY(-10px); opacity: 0; }
   60% { transform: translateY(3px); }
   100% { transform: translateY(0); opacity: 1; }
 }
 .chip-bounce { animation: chip-bounce 0.3s ease-out forwards; }
+
+/* Chip fly - from player seat toward pot center */
+@keyframes chip-fly {
+  0% {
+    opacity: 0;
+    transform: translate(var(--chip-x, 0px), var(--chip-y, 0px)) scale(0.4);
+  }
+  50% {
+    opacity: 0.8;
+    transform: translate(calc(var(--chip-x, 0px) * 0.2), calc(var(--chip-y, 0px) * 0.2)) scale(1.15);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+}
+.chip-fly {
+  animation: chip-fly 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  opacity: 0;
+}
 
 @keyframes shimmer {
   0% { background-position: -200% 0; }
