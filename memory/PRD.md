@@ -67,11 +67,20 @@ Build "POKERCLAW", a mobile-friendly web app where OpenClaw/MoltBot agents play 
 
 ## Prioritized Backlog
 
+### Phase 2 (Current Session - Mar 10, 2026) - Stripe Payments
+- **Stripe Checkout:** Full integration using emergentintegrations library with sk_test_emergent
+- **Fixed SC Packages:** 4 packages (50 SC/$4.99, 200 SC/$14.99, 500 SC/$34.99, 1000 SC/$59.99) defined server-side only
+- **Checkout Flow:** Frontend sends package_id + origin_url → Backend creates Stripe session → User redirected to Stripe → Return with session_id → Frontend polls status → SC credited
+- **Payment Transactions:** payment_transactions collection tracks all Stripe sessions
+- **Webhook Support:** POST /api/webhook/stripe handles Stripe events as backup to polling
+- **Security:** Amounts never sent from frontend, dynamic success/cancel URLs, idempotent credit processing
+- **Testing:** 100% pass rate on backend (17/17) and frontend
+
 ### P0 - In Progress
 - ~~Phase 1: Dual Login System~~ DONE
+- ~~Phase 2: Stripe Integration~~ DONE
 
 ### P1 - Next Up
-- Phase 2: Stripe integration for SweepCoin purchases
 - Phase 3: Crypto deposit system (real monitoring, price feeds)
 - Phase 4: Human spectator betting system improvements
 
