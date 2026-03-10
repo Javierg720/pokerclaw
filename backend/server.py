@@ -1159,7 +1159,7 @@ async def create_tournament(user=Depends(get_current_user)):
 
 
 async def _create_tournament_game(agent_ids_list):
-    """Create and fully play a tournament game, return the game doc."""
+    """Create a tournament game, return game_id."""
     agents = []
     for aid in agent_ids_list:
         agent = await db.agents.find_one({"id": aid}, {"_id": 0})
@@ -1182,6 +1182,8 @@ async def _create_tournament_game(agent_ids_list):
         "id": game_id, "table_id": None, "phase": "waiting",
         "players": players, "community_cards": [], "pot": 0,
         "deck": deck, "dealer_index": 0, "actions_log": [],
+        "current_actor": None, "turn_index": 0,
+        "round_bet": 0, "round_phase": None, "last_action": None,
         "winner_id": None, "winner_name": None, "winning_hand": None,
         "house_rake": 0, "final_pot": 0,
         "created_at": datetime.now(timezone.utc).isoformat(), "completed_at": None
@@ -1191,7 +1193,8 @@ async def _create_tournament_game(agent_ids_list):
 
 
 async def _advance_tournament_game(game_id):
-    """Advance a tournament game by one phase, return updated game."""
+    """Advance a tournament game by one step. With turn-by-turn, this
+    processes a single agent action or phase transition."""
     game = await db.games.find_one({"id": game_id}, {"_id": 0})
     if not game or game['phase'] == 'complete':
         return game
@@ -1203,6 +1206,15 @@ async def _advance_tournament_game(game_id):
     save_doc = {k: v for k, v in updated.items() if k != '_id'}
     await db.games.replace_one({"id": game_id}, save_doc)
     return updated
+
+
+async def _play_tournament_game_to_completion(game_id, max_steps=200):
+    """Play a tournament game to completion by advancing until done."""
+    for _ in range(max_steps):
+        game = await _advance_tournament_game(game_id)
+        if not game or game['phase'] == 'complete':
+            return game
+    return await db.games.find_one({"id": game_id}, {"_id": 0})
 
 
 def _get_top2(game):
@@ -1231,40 +1243,43 @@ async def advance_tournament(tournament_id: str, user=Depends(get_current_user))
     bracket = t['bracket']
 
     if t['status'] == 'lobby':
-        # Start semi-finals: create games
+        # Start semi-finals: create games and play them to completion
         gid1 = await _create_tournament_game(bracket['semi_1']['agent_ids'])
         gid2 = await _create_tournament_game(bracket['semi_2']['agent_ids'])
         bracket['semi_1']['game_id'] = gid1
         bracket['semi_2']['game_id'] = gid2
-        bracket['semi_1']['game_phase'] = 'waiting'
-        bracket['semi_2']['game_phase'] = 'waiting'
-        t['status'] = 'semis'
 
-    elif t['status'] == 'semis':
-        # Advance semi games
-        for semi_key in ['semi_1', 'semi_2']:
-            semi = bracket[semi_key]
-            if not semi['complete'] and semi['game_id']:
-                game = await _advance_tournament_game(semi['game_id'])
-                semi['game_phase'] = game.get('phase', 'unknown') if game else None
-                if game and game['phase'] == 'complete':
-                    semi['complete'] = True
-                    semi['winners'] = _get_top2(game)
+        # Play both semis to completion
+        game1 = await _play_tournament_game_to_completion(gid1)
+        game2 = await _play_tournament_game_to_completion(gid2)
 
-        # If both semis done, create final
-        if bracket['semi_1']['complete'] and bracket['semi_2']['complete']:
-            final_agents = bracket['semi_1']['winners'] + bracket['semi_2']['winners']
-            bracket['final']['agent_ids'] = final_agents
-            gid_final = await _create_tournament_game(final_agents)
-            bracket['final']['game_id'] = gid_final
-            bracket['final']['game_phase'] = 'waiting'
-            t['status'] = 'final'
+        bracket['semi_1']['game_phase'] = 'complete'
+        bracket['semi_1']['complete'] = True
+        bracket['semi_1']['winners'] = _get_top2(game1)
+
+        bracket['semi_2']['game_phase'] = 'complete'
+        bracket['semi_2']['complete'] = True
+        bracket['semi_2']['winners'] = _get_top2(game2)
+
+        # Create final game
+        final_agents = bracket['semi_1']['winners'] + bracket['semi_2']['winners']
+        bracket['final']['agent_ids'] = final_agents
+        gid_final = await _create_tournament_game(final_agents)
+        bracket['final']['game_id'] = gid_final
+        bracket['final']['game_phase'] = 'waiting'
+        t['status'] = 'final'
 
     elif t['status'] == 'final':
         final = bracket['final']
         if not final['complete'] and final['game_id']:
             game = await _advance_tournament_game(final['game_id'])
-            final['game_phase'] = game.get('phase', 'unknown') if game else None
+            display_phase = {
+                'preflop_betting': 'preflop', 'flop_deal': 'flop',
+                'flop_betting': 'flop', 'turn_deal': 'turn',
+                'turn_betting': 'turn', 'river_deal': 'river',
+                'river_betting': 'river',
+            }
+            final['game_phase'] = display_phase.get(game['phase'], game['phase']) if game else None
             if game and game['phase'] == 'complete':
                 final['complete'] = True
                 final['winner'] = game.get('winner_id')
