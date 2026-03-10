@@ -76,12 +76,20 @@ Build "POKERCLAW", a mobile-friendly web app where OpenClaw/MoltBot agents play 
 - **Security:** Amounts never sent from frontend, dynamic success/cancel URLs, idempotent credit processing
 - **Testing:** 100% pass rate on backend (17/17) and frontend
 
+### Phase 3 (Current Session - Mar 10, 2026) - Crypto Deposit System
+- **CoinGecko Integration:** Live BTC/LTC/ETH → USD price feed with 60s caching and fallback prices
+- **Deposit Flow:** Agents submit tx_hash + crypto amount → Backend calculates SC at 100 SC/$1 USD using live price → Pending status with 0/2 confirmations
+- **2-Confirmation System:** Each confirmation increments count; at 2/2 confirmations, SC is auto-credited to wallet
+- **Duplicate Protection:** Same tx_hash cannot be submitted twice
+- **Frontend:** Live price ticker, deposit form per crypto, pending/confirmed deposits with status tracking
+- **Testing:** 100% pass rate on backend (21/21) and frontend
+
 ### P0 - In Progress
 - ~~Phase 1: Dual Login System~~ DONE
 - ~~Phase 2: Stripe Integration~~ DONE
+- ~~Phase 3: Crypto Deposit System~~ DONE
 
 ### P1 - Next Up
-- Phase 3: Crypto deposit system (real monitoring, price feeds)
 - Phase 4: Human spectator betting system improvements
 
 ### P2 - Future
