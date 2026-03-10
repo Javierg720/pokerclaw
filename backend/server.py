@@ -1,874 +1,91 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from dotenv import load_dotenv
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
+from deps import db, client, logger
+from game_engine import AGENT_PRESETS, AVATAR_URLS
 import os
-import logging
 import uuid
-import jwt
-import bcrypt
-import random
-import hashlib
-import httpx
+import json
 import asyncio
-import time
-from pathlib import Path
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict
+import logging
 from datetime import datetime, timezone
-from game_engine import (
-    create_deck, advance_game, best_hand,
-    AGENT_PRESETS, AVATAR_URLS, STRATEGIES
-)
-from emergentintegrations.payments.stripe.checkout import (
-    StripeCheckout, CheckoutSessionRequest, CheckoutSessionResponse, CheckoutStatusResponse
-)
+from emergentintegrations.payments.stripe.checkout import StripeCheckout
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
-
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-JWT_SECRET = os.environ.get('JWT_SECRET', 'pokerclaw_fallback_secret')
-
-app = FastAPI()
-api_router = APIRouter(prefix="/api")
-security = HTTPBearer(auto_error=False)
+# ─── Route imports ───
+from routes.auth import router as auth_router
+from routes.agents import router as agents_router
+from routes.tables import router as tables_router
+from routes.bets import router as bets_router
+from routes.wallet import router as wallet_router
+from routes.stripe_routes import router as stripe_router
+from routes.crypto import router as crypto_router
+from routes.tournaments import router as tournaments_router
+from routes.leaderboard import router as leaderboard_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
-# ─── Helpers ───
-
-def create_token(user_id: str, username: str, role: str = "human"):
-    return jwt.encode(
-        {"user_id": user_id, "username": username, "role": role,
-         "exp": datetime.now(timezone.utc).timestamp() + 604800},
-        JWT_SECRET, algorithm="HS256"
-    )
-
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    if not credentials:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    try:
-        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=["HS256"])
-        user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0})
-        if not user:
-            raise HTTPException(status_code=401, detail="User not found")
-        return user
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-def generate_crypto_addresses(user_id: str):
-    """Generate deterministic crypto wallet addresses for an agent user."""
-    seed = hashlib.sha256(user_id.encode()).hexdigest()
-    seed2 = hashlib.sha256((user_id + "salt2").encode()).hexdigest()
-    seed3 = hashlib.sha256((user_id + "salt3").encode()).hexdigest()
-    return {
-        "btc": f"1{seed[:33].title()[:33]}",
-        "ltc": f"L{seed2[5:38].title()[:33]}",
-        "eth": f"0x{seed3[:40]}"
-    }
-
-def sanitize_game_for_response(game, show_cards=False):
-    """Remove deck and optionally hide hole cards. Include turn info."""
-    g = {k: v for k, v in game.items() if k not in ('_id', 'deck')}
-    show = show_cards or g.get('phase') in ('showdown', 'complete')
-    if not show:
-        for p in g.get('players', []):
-            p['hole_cards'] = [None, None]
-    # Map internal phases to display phases for frontend
-    phase_display = {
-        'preflop_betting': 'preflop',
-        'flop_deal': 'flop',
-        'flop_betting': 'flop',
-        'turn_deal': 'turn',
-        'turn_betting': 'turn',
-        'river_deal': 'river',
-        'river_betting': 'river',
-    }
-    g['display_phase'] = phase_display.get(g.get('phase'), g.get('phase'))
-    g['is_betting'] = g.get('phase', '').endswith('_betting')
-    return g
+app = FastAPI()
 
 
 # ─── WebSocket Manager ───
 
 class TableManager:
     def __init__(self):
-        self.connections: dict[str, set] = {}
+        self.connections: dict[str, list[WebSocket]] = {}
 
     async def connect(self, table_id: str, ws: WebSocket):
         await ws.accept()
         if table_id not in self.connections:
-            self.connections[table_id] = set()
-        self.connections[table_id].add(ws)
-        await self.broadcast_spectators(table_id)
+            self.connections[table_id] = []
+        self.connections[table_id].append(ws)
 
-    async def disconnect(self, table_id: str, ws: WebSocket):
-        self.connections.get(table_id, set()).discard(ws)
-        await self.broadcast_spectators(table_id)
-
-    def get_count(self, table_id: str) -> int:
-        return len(self.connections.get(table_id, set()))
-
-    async def broadcast_spectators(self, table_id: str):
-        await self.broadcast(table_id, {"type": "spectators", "count": self.get_count(table_id)})
-
-    async def broadcast_game_state(self, table_id: str, game: dict):
-        sanitized = sanitize_game_for_response(game)
-        await self.broadcast(table_id, {"type": "game_state", "game": sanitized})
+    def disconnect(self, table_id: str, ws: WebSocket):
+        if table_id in self.connections:
+            self.connections[table_id] = [c for c in self.connections[table_id] if c != ws]
+            if not self.connections[table_id]:
+                del self.connections[table_id]
 
     async def broadcast(self, table_id: str, message: dict):
-        dead = set()
-        for ws in self.connections.get(table_id, set()).copy():
+        if table_id not in self.connections:
+            return
+        dead = []
+        for ws in self.connections[table_id]:
             try:
                 await ws.send_json(message)
             except Exception:
-                dead.add(ws)
-        self.connections.get(table_id, set()).difference_update(dead)
-
-table_mgr = TableManager()
-
-
-# ─── Models ───
-
-class SignupRequest(BaseModel):
-    username: str
-    email: str
-    password: str
-    role: str = "human"  # "agent" or "human"
-    agent_name: Optional[str] = None  # Required for agent role
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-class BetRequest(BaseModel):
-    game_id: str
-    agent_id: str
-    amount: int
-    currency: str = "gc"
-
-class PurchaseRequest(BaseModel):
-    amount: int
-    currency: str = "sc"
-
-class CashoutRequest(BaseModel):
-    amount: int
-
-class TournamentBetRequest(BaseModel):
-    tournament_id: str
-    agent_id: str
-    amount: int
-    currency: str = "gc"
-
-class StripeCheckoutRequest(BaseModel):
-    package_id: str
-    origin_url: str
-
-class CryptoDepositRequest(BaseModel):
-    crypto_type: str  # btc, ltc, eth
-    tx_hash: str
-    amount_crypto: float
-
-# Fixed SC purchase packages (amounts defined server-side only)
-# Rate: 100 SC per $1 USD
-SC_PACKAGES = {
-    "sc_499": {"sc_amount": 499, "price_usd": 4.99, "label": "499 SweepCoins"},
-    "sc_999": {"sc_amount": 999, "price_usd": 9.99, "label": "999 SweepCoins"},
-    "sc_1999": {"sc_amount": 1999, "price_usd": 19.99, "label": "1,999 SweepCoins"},
-    "sc_4999": {"sc_amount": 4999, "price_usd": 49.99, "label": "4,999 SweepCoins"},
-    "sc_9999": {"sc_amount": 9999, "price_usd": 99.99, "label": "9,999 SweepCoins"},
-}
-
-# Crypto price cache
-CRYPTO_COIN_IDS = {"btc": "bitcoin", "ltc": "litecoin", "eth": "ethereum"}
-_price_cache: Dict[str, dict] = {}
-_price_cache_time: float = 0
-PRICE_CACHE_TTL = 60  # seconds
-
-
-# ─── Auth ───
-
-@api_router.post("/auth/signup")
-async def signup(req: SignupRequest):
-    if req.role not in ("agent", "human"):
-        raise HTTPException(status_code=400, detail="Role must be 'agent' or 'human'")
-
-    existing = await db.users.find_one({"email": req.email}, {"_id": 0})
-    if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    existing_name = await db.users.find_one({"username": req.username}, {"_id": 0})
-    if existing_name:
-        raise HTTPException(status_code=400, detail="Username taken")
-
-    hashed = bcrypt.hashpw(req.password.encode(), bcrypt.gensalt()).decode()
-    user_id = str(uuid.uuid4())
-    user = {
-        "id": user_id,
-        "username": req.username,
-        "email": req.email,
-        "password_hash": hashed,
-        "role": req.role,
-        "agent_id": None,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-
-    agent_data = None
-
-    if req.role == "agent":
-        # Create a MoltBot agent for this user
-        agent_name = req.agent_name or f"MoltBot_{req.username}"
-        existing_agent = await db.agents.find_one({"name": agent_name}, {"_id": 0})
-        if existing_agent:
-            raise HTTPException(status_code=400, detail="Agent name already taken")
-
-        strategies = list(STRATEGIES.keys())
-        agent_id = str(uuid.uuid4())
-        agent = {
-            "id": agent_id,
-            "name": agent_name,
-            "strategy": random.choice(strategies),
-            "avatar_url": random.choice(AVATAR_URLS),
-            "tagline": f"Autonomous MoltBot agent owned by {req.username}",
-            "owner_id": user_id,
-            "is_house": False,
-            "wins": 0,
-            "losses": 0,
-            "total_games": 0,
-            "total_chips_won": 0,
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db.agents.insert_one(agent)
-        user["agent_id"] = agent_id
-        agent_data = {k: v for k, v in agent.items() if k != "_id"}
-
-    await db.users.insert_one(user)
-
-    # Create wallet with zero balance (no welcome bonus)
-    crypto_addresses = generate_crypto_addresses(user_id) if req.role == "agent" else None
-    wallet = {
-        "id": str(uuid.uuid4()),
-        "user_id": user_id,
-        "sc_balance": 0,
-        "gc_balance": 0,
-        "crypto_addresses": crypto_addresses,
-        "pending_deposits": [],
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    await db.wallets.insert_one(wallet)
-
-    token = create_token(user_id, req.username, req.role)
-    return {
-        "token": token,
-        "user": {
-            "id": user_id, "username": req.username,
-            "email": req.email, "role": req.role,
-            "agent_id": user.get("agent_id")
-        },
-        "agent": agent_data
-    }
-
-
-@api_router.post("/auth/login")
-async def login(req: LoginRequest):
-    user = await db.users.find_one({"email": req.email}, {"_id": 0})
-    if not user or not bcrypt.checkpw(req.password.encode(), user['password_hash'].encode()):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    role = user.get('role', 'human')
-    token = create_token(user['id'], user['username'], role)
-    return {
-        "token": token,
-        "user": {
-            "id": user['id'], "username": user['username'],
-            "email": user['email'], "role": role,
-            "agent_id": user.get('agent_id')
-        }
-    }
-
-
-@api_router.get("/auth/me")
-async def get_me(user=Depends(get_current_user)):
-    result = {
-        "id": user['id'], "username": user['username'],
-        "email": user['email'], "role": user.get('role', 'human'),
-        "agent_id": user.get('agent_id')
-    }
-    if user.get('agent_id'):
-        agent = await db.agents.find_one({"id": user['agent_id']}, {"_id": 0})
-        if agent:
-            result['agent'] = agent
-    return result
-
-
-# ─── Agents ───
-
-@api_router.get("/agents")
-async def list_agents():
-    agents = await db.agents.find({}, {"_id": 0}).to_list(100)
-    return agents
-
-
-@api_router.get("/agents/my-agent")
-async def get_my_agent(user=Depends(get_current_user)):
-    if user.get('role') != 'agent':
-        raise HTTPException(status_code=403, detail="Only agent accounts have agents")
-    if not user.get('agent_id'):
-        raise HTTPException(status_code=404, detail="No agent linked to account")
-    agent = await db.agents.find_one({"id": user['agent_id']}, {"_id": 0})
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    wallet = await db.wallets.find_one({"user_id": user['id']}, {"_id": 0})
-    return {
-        "agent": agent,
-        "wallet": {k: v for k, v in wallet.items() if k != "_id"} if wallet else None
-    }
-
-
-@api_router.get("/agents/my-agent/activity")
-async def get_my_agent_activity(user=Depends(get_current_user)):
-    if user.get('role') != 'agent' or not user.get('agent_id'):
-        raise HTTPException(status_code=403, detail="Only agent accounts have activity")
-    agent_id = user['agent_id']
-
-    # Find recent completed games where this agent played
-    games = await db.games.find(
-        {"players.agent_id": agent_id, "phase": {"$in": ["complete", "showdown"]}},
-        {"_id": 0, "deck": 0}
-    ).sort("completed_at", -1).to_list(20)
-
-    activity = []
-    for g in games:
-        player = next((p for p in g.get('players', []) if p['agent_id'] == agent_id), None)
-        if not player:
-            continue
-        won = g.get('winner_id') == agent_id
-        opponents = [p['agent_name'] for p in g.get('players', []) if p['agent_id'] != agent_id and not p.get('folded')]
-        activity.append({
-            "game_id": g['id'],
-            "table_id": g.get('table_id'),
-            "result": "win" if won else "loss",
-            "hand": g.get('winning_hand') if won else (player.get('hand_name') or 'Folded'),
-            "pot": g.get('pot', 0),
-            "final_pot": g.get('final_pot', 0) if won else 0,
-            "house_rake": g.get('house_rake', 0) if won else 0,
-            "opponents": opponents[:3],
-            "completed_at": g.get('completed_at') or g.get('created_at'),
-        })
-
-    # Also get recent transactions for this user
-    txns = await db.transactions.find(
-        {"user_id": user['id'], "type": {"$in": ["game_winnings", "bet_won", "tournament_won"]}},
-        {"_id": 0}
-    ).sort("created_at", -1).to_list(10)
-
-    return {"activity": activity, "earnings": txns}
-
-
-@api_router.get("/agents/{agent_id}")
-async def get_agent(agent_id: str):
-    agent = await db.agents.find_one({"id": agent_id}, {"_id": 0})
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    return agent
-
-
-# ─── Tables ───
-
-@api_router.get("/tables")
-async def list_tables():
-    tables = await db.tables.find({}, {"_id": 0}).to_list(100)
-    for table in tables:
-        table['spectators'] = table_mgr.get_count(table['id'])
-        if table.get('current_game_id'):
-            game = await db.games.find_one({"id": table['current_game_id']}, {"_id": 0, "deck": 0})
-            if game:
-                table['current_game'] = {
-                    "id": game['id'],
-                    "phase": game['phase'],
-                    "pot": game['pot'],
-                    "player_count": len(game.get('players', []))
-                }
-    return tables
-
-
-@api_router.get("/tables/{table_id}")
-async def get_table(table_id: str):
-    table = await db.tables.find_one({"id": table_id}, {"_id": 0})
-    if not table:
-        raise HTTPException(status_code=404, detail="Table not found")
-
-    if table.get('current_game_id'):
-        game = await db.games.find_one({"id": table['current_game_id']}, {"_id": 0})
-        if game:
-            table['current_game'] = sanitize_game_for_response(game)
-    return table
-
-
-# ─── Games ───
-
-@api_router.post("/tables/{table_id}/start-game")
-async def start_game(table_id: str, user=Depends(get_current_user)):
-    table = await db.tables.find_one({"id": table_id}, {"_id": 0})
-    if not table:
-        raise HTTPException(status_code=404, detail="Table not found")
-
-    # Check if there's an active game
-    if table.get('current_game_id'):
-        existing = await db.games.find_one({"id": table['current_game_id']}, {"_id": 0})
-        if existing and existing['phase'] not in ('complete',):
-            raise HTTPException(status_code=400, detail="Game already in progress")
-
-    # Get agents for this table
-    agents = []
-    for aid in table['agent_ids']:
-        agent = await db.agents.find_one({"id": aid}, {"_id": 0})
-        if agent:
-            agents.append(agent)
-
-    deck = create_deck()
-    game_id = str(uuid.uuid4())
-    players = []
-    for i, agent in enumerate(agents):
-        players.append({
-            "agent_id": agent['id'],
-            "agent_name": agent['name'],
-            "avatar_url": agent['avatar_url'],
-            "strategy": agent['strategy'],
-            "hole_cards": [],
-            "chips": 1000,
-            "current_bet": 0,
-            "total_bet": 0,
-            "folded": False,
-            "is_dealer": i == 0,
-            "hand_rank": 0,
-            "hand_name": ""
-        })
-
-    game = {
-        "id": game_id,
-        "table_id": table_id,
-        "phase": "waiting",
-        "players": players,
-        "community_cards": [],
-        "pot": 0,
-        "deck": deck,
-        "dealer_index": 0,
-        "actions_log": [],
-        "current_actor": None,
-        "turn_index": 0,
-        "round_bet": 0,
-        "round_phase": None,
-        "last_action": None,
-        "winner_id": None,
-        "winner_name": None,
-        "winning_hand": None,
-        "house_rake": 0,
-        "final_pot": 0,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "completed_at": None
-    }
-
-    await db.games.insert_one(game)
-    await db.tables.update_one({"id": table_id}, {"$set": {"current_game_id": game_id}})
-
-    await table_mgr.broadcast_game_state(table_id, game)
-    return sanitize_game_for_response(game)
-
-
-@api_router.get("/games/{game_id}")
-async def get_game(game_id: str):
-    game = await db.games.find_one({"id": game_id}, {"_id": 0})
-    if not game:
-        raise HTTPException(status_code=404, detail="Game not found")
-    return sanitize_game_for_response(game)
-
-
-@api_router.post("/games/{game_id}/advance")
-async def advance_game_endpoint(game_id: str, user=Depends(get_current_user)):
-    game = await db.games.find_one({"id": game_id}, {"_id": 0})
-    if not game:
-        raise HTTPException(status_code=404, detail="Game not found")
-    if game['phase'] == 'complete':
-        raise HTTPException(status_code=400, detail="Game already complete")
-
-    # Advance the game
-    updated = advance_game(game)
-
-    if updated['phase'] == 'complete':
-        updated['completed_at'] = datetime.now(timezone.utc).isoformat()
-        # Update agent stats
-        if updated.get('winner_id'):
-            await db.agents.update_one(
-                {"id": updated['winner_id']},
-                {"$inc": {"wins": 1, "total_games": 1, "total_chips_won": updated.get('final_pot', 0)}}
-            )
-            for p in updated['players']:
-                if p['agent_id'] != updated['winner_id']:
-                    await db.agents.update_one(
-                        {"id": p['agent_id']},
-                        {"$inc": {"losses": 1, "total_games": 1}}
-                    )
-
-            # Credit winner agent owner's wallet with winnings
-            winner_agent = await db.agents.find_one({"id": updated['winner_id']}, {"_id": 0})
-            if winner_agent and winner_agent.get('owner_id'):
-                winnings = updated.get('final_pot', 0)
-                sc_credit = max(1, winnings // 10)  # Convert game chips to SC
-                await db.wallets.update_one(
-                    {"user_id": winner_agent['owner_id']},
-                    {"$inc": {"sc_balance": sc_credit}}
-                )
-                await db.transactions.insert_one({
-                    "id": str(uuid.uuid4()),
-                    "user_id": winner_agent['owner_id'],
-                    "type": "game_winnings",
-                    "amount": sc_credit,
-                    "currency": "sc",
-                    "description": f"{winner_agent['name']} won {winnings} chips (pot after 20% rake)",
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                })
-
-        # Settle bets
-        bets = await db.bets.find({"game_id": game_id, "status": "pending"}, {"_id": 0}).to_list(1000)
-        total_bet_pool = sum(b['amount'] for b in bets)
-        winning_bets = [b for b in bets if b['agent_id'] == updated.get('winner_id')]
-        total_winning_bets = sum(b['amount'] for b in winning_bets)
-
-        for bet in bets:
-            if bet['agent_id'] == updated.get('winner_id') and total_winning_bets > 0:
-                payout = int((bet['amount'] / total_winning_bets) * total_bet_pool * 0.8)
-                await db.bets.update_one({"id": bet['id']}, {"$set": {"status": "won", "payout": payout}})
-                currency_field = f"{bet['currency']}_balance"
-                await db.wallets.update_one(
-                    {"user_id": bet['user_id']},
-                    {"$inc": {currency_field: payout}}
-                )
-                await db.transactions.insert_one({
-                    "id": str(uuid.uuid4()),
-                    "user_id": bet['user_id'],
-                    "type": "bet_won",
-                    "amount": payout,
-                    "currency": bet['currency'],
-                    "description": f"Won bet on {updated.get('winner_name', 'agent')}",
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                })
-            else:
-                await db.bets.update_one({"id": bet['id']}, {"$set": {"status": "lost", "payout": 0}})
-
-    # Save to DB (remove _id if present to avoid issues)
-    save_doc = {k: v for k, v in updated.items() if k != '_id'}
-    await db.games.replace_one({"id": game_id}, save_doc)
-
-    # Broadcast to spectators
-    table_id = updated.get('table_id')
-    if table_id:
-        await table_mgr.broadcast_game_state(table_id, updated)
-
-    return sanitize_game_for_response(updated)
-
-
-# ─── Bets ───
-
-@api_router.post("/bets")
-async def place_bet(req: BetRequest, user=Depends(get_current_user)):
-    game = await db.games.find_one({"id": req.game_id}, {"_id": 0})
-    if not game:
-        raise HTTPException(status_code=404, detail="Game not found")
-    if game['phase'] in ('complete',):
-        raise HTTPException(status_code=400, detail="Cannot bet on completed game")
-
-    # Check agent is in game
-    agent_ids = [p['agent_id'] for p in game['players']]
-    if req.agent_id not in agent_ids:
-        raise HTTPException(status_code=400, detail="Agent not in this game")
-
-    # Check wallet balance
-    wallet = await db.wallets.find_one({"user_id": user['id']}, {"_id": 0})
-    if not wallet:
-        raise HTTPException(status_code=400, detail="Wallet not found")
-
-    balance_field = f"{req.currency}_balance"
-    if wallet.get(balance_field, 0) < req.amount:
-        raise HTTPException(status_code=400, detail="Insufficient balance")
-
-    # Deduct from wallet
-    await db.wallets.update_one(
-        {"user_id": user['id']},
-        {"$inc": {balance_field: -req.amount}}
-    )
-
-    bet_id = str(uuid.uuid4())
-    bet = {
-        "id": bet_id,
-        "user_id": user['id'],
-        "username": user['username'],
-        "game_id": req.game_id,
-        "agent_id": req.agent_id,
-        "amount": req.amount,
-        "currency": req.currency,
-        "status": "pending",
-        "payout": 0,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    await db.bets.insert_one(bet)
-
-    # Record transaction
-    await db.transactions.insert_one({
-        "id": str(uuid.uuid4()),
-        "user_id": user['id'],
-        "type": "bet_placed",
-        "amount": -req.amount,
-        "currency": req.currency,
-        "description": f"Bet on game {req.game_id[:8]}...",
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
-
-    return {"id": bet_id, "status": "pending", "amount": req.amount}
-
-
-@api_router.get("/bets/my-bets")
-async def get_my_bets(user=Depends(get_current_user)):
-    bets = await db.bets.find({"user_id": user['id']}, {"_id": 0}).sort("created_at", -1).to_list(100)
-    return bets
-
-
-@api_router.get("/bets/game/{game_id}")
-async def get_game_bets(game_id: str):
-    bets = await db.bets.find({"game_id": game_id}, {"_id": 0}).to_list(1000)
-    return bets
-
-
-@api_router.get("/bets/game/{game_id}/odds")
-async def get_game_odds(game_id: str):
-    """Calculate live odds based on current bets for a game."""
-    bets = await db.bets.find({"game_id": game_id, "status": "pending"}, {"_id": 0}).to_list(1000)
-    game = await db.games.find_one({"id": game_id}, {"_id": 0})
-    if not game:
-        raise HTTPException(status_code=404, detail="Game not found")
-
-    total_pool = sum(b['amount'] for b in bets)
-    agent_pools = {}
-    agent_bet_counts = {}
-    for b in bets:
-        agent_pools[b['agent_id']] = agent_pools.get(b['agent_id'], 0) + b['amount']
-        agent_bet_counts[b['agent_id']] = agent_bet_counts.get(b['agent_id'], 0) + 1
-
-    odds = []
-    for p in game.get('players', []):
-        aid = p['agent_id']
-        pool = agent_pools.get(aid, 0)
-        bets_count = agent_bet_counts.get(aid, 0)
-        # Calculate payout multiplier (how much you win per 1 SC bet)
-        if total_pool > 0 and pool > 0:
-            multiplier = round((total_pool * 0.8) / pool, 2)
-        else:
-            # No bets yet - estimate based on equal distribution
-            active = len([pp for pp in game['players'] if not pp.get('folded')])
-            multiplier = round(active * 0.8, 2) if active > 0 else 1.0
-
-        pct = round((pool / total_pool) * 100, 1) if total_pool > 0 else 0
-        odds.append({
-            "agent_id": aid,
-            "agent_name": p['agent_name'],
-            "avatar_url": p.get('avatar_url'),
-            "pool": pool,
-            "bets_count": bets_count,
-            "pct": pct,
-            "multiplier": multiplier,
-            "folded": p.get('folded', False),
-        })
-
-    return {
-        "total_pool": total_pool,
-        "total_bets": len(bets),
-        "odds": odds,
-    }
-
-
-# ─── Wallet ───
-
-@api_router.get("/wallet")
-async def get_wallet(user=Depends(get_current_user)):
-    wallet = await db.wallets.find_one({"user_id": user['id']}, {"_id": 0})
-    if not wallet:
-        raise HTTPException(status_code=404, detail="Wallet not found")
-    return wallet
-
-
-@api_router.post("/wallet/purchase")
-async def purchase_coins(req: PurchaseRequest, user=Depends(get_current_user)):
-    currency_field = f"{req.currency}_balance"
-    await db.wallets.update_one(
-        {"user_id": user['id']},
-        {"$inc": {currency_field: req.amount}}
-    )
-    await db.transactions.insert_one({
-        "id": str(uuid.uuid4()),
-        "user_id": user['id'],
-        "type": "purchase",
-        "amount": req.amount,
-        "currency": req.currency,
-        "description": f"Purchased {req.amount} {req.currency.upper()}",
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
-    wallet = await db.wallets.find_one({"user_id": user['id']}, {"_id": 0})
-    return wallet
-
-
-@api_router.post("/wallet/cashout")
-async def cashout(req: CashoutRequest, user=Depends(get_current_user)):
-    wallet = await db.wallets.find_one({"user_id": user['id']}, {"_id": 0})
-    if not wallet or wallet.get('sc_balance', 0) < req.amount:
-        raise HTTPException(status_code=400, detail="Insufficient SC balance")
-
-    await db.wallets.update_one(
-        {"user_id": user['id']},
-        {"$inc": {"sc_balance": -req.amount}}
-    )
-    await db.transactions.insert_one({
-        "id": str(uuid.uuid4()),
-        "user_id": user['id'],
-        "type": "cashout",
-        "amount": -req.amount,
-        "currency": "sc",
-        "description": f"Cashout {req.amount} SC to crypto (pending)",
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
-    wallet = await db.wallets.find_one({"user_id": user['id']}, {"_id": 0})
-    return {"message": "Cashout initiated", "wallet": wallet}
-
-
-@api_router.get("/wallet/transactions")
-async def get_transactions(user=Depends(get_current_user)):
-    txns = await db.transactions.find(
-        {"user_id": user['id']}, {"_id": 0}
-    ).sort("created_at", -1).to_list(100)
-    return txns
-
-
-# ─── Stripe Checkout ───
-
-@api_router.get("/stripe/packages")
-async def get_stripe_packages():
-    return [
-        {"id": k, "sc_amount": v["sc_amount"], "price_usd": v["price_usd"], "label": v["label"]}
-        for k, v in SC_PACKAGES.items()
-    ]
-
-
-@api_router.post("/stripe/checkout")
-async def create_stripe_checkout(req: StripeCheckoutRequest, http_request: Request, user=Depends(get_current_user)):
-    pkg = SC_PACKAGES.get(req.package_id)
-    if not pkg:
-        raise HTTPException(status_code=400, detail="Invalid package")
-
-    stripe_key = os.environ.get("STRIPE_API_KEY")
-    if not stripe_key:
-        raise HTTPException(status_code=500, detail="Stripe not configured")
-
-    host_url = str(http_request.base_url).rstrip("/")
-    webhook_url = f"{host_url}/api/webhook/stripe"
-    stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url=webhook_url)
-
-    origin = req.origin_url.rstrip("/")
-    success_url = f"{origin}/wallet?session_id={{CHECKOUT_SESSION_ID}}&status=success"
-    cancel_url = f"{origin}/wallet?status=cancelled"
-
-    metadata = {
-        "user_id": user["id"],
-        "username": user.get("username", ""),
-        "package_id": req.package_id,
-        "sc_amount": str(pkg["sc_amount"]),
-    }
-
-    checkout_req = CheckoutSessionRequest(
-        amount=float(pkg["price_usd"]),
-        currency="usd",
-        success_url=success_url,
-        cancel_url=cancel_url,
-        metadata=metadata,
-    )
-
-    session = await stripe_checkout.create_checkout_session(checkout_req)
-
-    # Record payment transaction as pending
-    await db.payment_transactions.insert_one({
-        "id": str(uuid.uuid4()),
-        "session_id": session.session_id,
-        "user_id": user["id"],
-        "package_id": req.package_id,
-        "sc_amount": pkg["sc_amount"],
-        "amount_usd": pkg["price_usd"],
-        "payment_status": "pending",
-        "status": "initiated",
-        "metadata": metadata,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "completed_at": None,
-    })
-
-    return {"url": session.url, "session_id": session.session_id}
-
-
-@api_router.get("/stripe/status/{session_id}")
-async def get_stripe_status(session_id: str, user=Depends(get_current_user)):
-    stripe_key = os.environ.get("STRIPE_API_KEY")
-    if not stripe_key:
-        raise HTTPException(status_code=500, detail="Stripe not configured")
-
-    stripe_checkout = StripeCheckout(api_key=stripe_key)
-    status = await stripe_checkout.get_checkout_status(session_id)
-
-    # Find the payment transaction
-    pt = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
-    if not pt:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-
-    # Only process if not already completed
-    if pt["payment_status"] != "paid" and status.payment_status == "paid":
-        sc_amount = pt["sc_amount"]
-        await db.wallets.update_one(
-            {"user_id": pt["user_id"]},
-            {"$inc": {"sc_balance": sc_amount}}
-        )
-        await db.payment_transactions.update_one(
-            {"session_id": session_id},
-            {"$set": {
-                "payment_status": "paid",
-                "status": "complete",
-                "completed_at": datetime.now(timezone.utc).isoformat()
-            }}
-        )
-        await db.transactions.insert_one({
-            "id": str(uuid.uuid4()),
-            "user_id": pt["user_id"],
-            "type": "stripe_purchase",
-            "amount": sc_amount,
-            "currency": "sc",
-            "description": f"Purchased {sc_amount} SC via Stripe (${pt['amount_usd']})",
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
-    elif status.payment_status != "paid":
-        await db.payment_transactions.update_one(
-            {"session_id": session_id},
-            {"$set": {"payment_status": status.payment_status, "status": status.status}}
-        )
-
-    return {
-        "status": status.status,
-        "payment_status": status.payment_status,
-        "sc_amount": pt["sc_amount"],
-        "amount_usd": pt["amount_usd"],
-    }
-
-
-# ─── Stripe Webhook ───
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(table_id, ws)
+
+    def spectator_count(self, table_id: str) -> int:
+        return len(self.connections.get(table_id, []))
+
+
+table_manager = TableManager()
+
+
+# ─── WebSocket endpoint ───
+
+@app.websocket("/api/ws/table/{table_id}")
+async def websocket_table(websocket: WebSocket, table_id: str):
+    await table_manager.connect(table_id, websocket)
+    try:
+        count = table_manager.spectator_count(table_id)
+        await table_manager.broadcast(table_id, {"type": "spectator_count", "count": count})
+        while True:
+            data = await websocket.receive_text()
+            try:
+                msg = json.loads(data)
+                if msg.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+            except json.JSONDecodeError:
+                pass
+    except WebSocketDisconnect:
+        table_manager.disconnect(table_id, websocket)
+        count = table_manager.spectator_count(table_id)
+        await table_manager.broadcast(table_id, {"type": "spectator_count", "count": count})
+
+
+# ─── Stripe Webhook (must be on app, not api_router) ───
 
 @app.post("/api/webhook/stripe")
 async def stripe_webhook(request: Request):
@@ -893,23 +110,14 @@ async def stripe_webhook(request: Request):
         if pt and pt["payment_status"] != "paid":
             sc_amount = pt["sc_amount"]
             await db.wallets.update_one(
-                {"user_id": pt["user_id"]},
-                {"$inc": {"sc_balance": sc_amount}}
-            )
+                {"user_id": pt["user_id"]}, {"$inc": {"sc_balance": sc_amount}})
             await db.payment_transactions.update_one(
                 {"session_id": session_id},
-                {"$set": {
-                    "payment_status": "paid",
-                    "status": "complete",
-                    "completed_at": datetime.now(timezone.utc).isoformat()
-                }}
-            )
+                {"$set": {"payment_status": "paid", "status": "complete",
+                          "completed_at": datetime.now(timezone.utc).isoformat()}})
             await db.transactions.insert_one({
-                "id": str(uuid.uuid4()),
-                "user_id": pt["user_id"],
-                "type": "stripe_purchase",
-                "amount": sc_amount,
-                "currency": "sc",
+                "id": str(uuid.uuid4()), "user_id": pt["user_id"],
+                "type": "stripe_purchase", "amount": sc_amount, "currency": "sc",
                 "description": f"Purchased {sc_amount} SC via Stripe (${pt['amount_usd']})",
                 "created_at": datetime.now(timezone.utc).isoformat()
             })
@@ -917,458 +125,14 @@ async def stripe_webhook(request: Request):
     return {"status": "ok"}
 
 
-# ─── Crypto Prices & Deposits ───
-
-async def get_crypto_prices():
-    """Fetch live crypto prices from CoinGecko with caching."""
-    global _price_cache, _price_cache_time
-    now = time.time()
-    if _price_cache and (now - _price_cache_time) < PRICE_CACHE_TTL:
-        return _price_cache
-
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            ids = ",".join(CRYPTO_COIN_IDS.values())
-            resp = await client.get(
-                f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true"
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                prices = {}
-                for short, coin_id in CRYPTO_COIN_IDS.items():
-                    if coin_id in data:
-                        prices[short] = {
-                            "usd": data[coin_id].get("usd", 0),
-                            "change_24h": data[coin_id].get("usd_24h_change", 0),
-                        }
-                _price_cache = prices
-                _price_cache_time = now
-                return prices
-    except Exception as e:
-        logger.warning(f"CoinGecko API error: {e}")
-
-    # Fallback prices if API fails
-    if _price_cache:
-        return _price_cache
-    return {
-        "btc": {"usd": 97000, "change_24h": 0},
-        "ltc": {"usd": 130, "change_24h": 0},
-        "eth": {"usd": 3500, "change_24h": 0},
-    }
-
-
-@api_router.get("/crypto/prices")
-async def crypto_prices():
-    prices = await get_crypto_prices()
-    return {"prices": prices, "rate": "100 SC per $1 USD"}
-
-
-@api_router.post("/crypto/deposit")
-async def submit_crypto_deposit(req: CryptoDepositRequest, user=Depends(get_current_user)):
-    if user.get('role') != 'agent':
-        raise HTTPException(status_code=403, detail="Only agent accounts can deposit crypto")
-    if req.crypto_type not in CRYPTO_COIN_IDS:
-        raise HTTPException(status_code=400, detail="Unsupported crypto. Use btc, ltc, or eth")
-    if req.amount_crypto <= 0:
-        raise HTTPException(status_code=400, detail="Amount must be positive")
-
-    # Check for duplicate tx_hash
-    existing = await db.crypto_deposits.find_one({"tx_hash": req.tx_hash}, {"_id": 0})
-    if existing:
-        raise HTTPException(status_code=400, detail="Transaction already submitted")
-
-    # Get current price
-    prices = await get_crypto_prices()
-    price_usd = prices.get(req.crypto_type, {}).get("usd", 0)
-    if price_usd <= 0:
-        raise HTTPException(status_code=500, detail="Unable to fetch crypto price")
-
-    usd_value = req.amount_crypto * price_usd
-    sc_amount = int(usd_value * 100)  # 100 SC per $1
-
-    deposit = {
-        "id": str(uuid.uuid4()),
-        "user_id": user['id'],
-        "crypto_type": req.crypto_type,
-        "tx_hash": req.tx_hash,
-        "amount_crypto": req.amount_crypto,
-        "price_usd_at_submit": price_usd,
-        "usd_value": round(usd_value, 2),
-        "sc_amount": sc_amount,
-        "confirmations": 0,
-        "required_confirmations": 2,
-        "status": "pending",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "confirmed_at": None,
-    }
-    await db.crypto_deposits.insert_one(deposit)
-
-    return {
-        "deposit_id": deposit["id"],
-        "crypto_type": req.crypto_type,
-        "amount_crypto": req.amount_crypto,
-        "price_usd": price_usd,
-        "usd_value": round(usd_value, 2),
-        "sc_amount": sc_amount,
-        "status": "pending",
-        "message": f"Deposit submitted. {sc_amount} SC will be credited after 2 confirmations."
-    }
-
-
-@api_router.get("/crypto/deposits")
-async def get_crypto_deposits(user=Depends(get_current_user)):
-    deposits = await db.crypto_deposits.find(
-        {"user_id": user['id']}, {"_id": 0}
-    ).sort("created_at", -1).to_list(50)
-    return deposits
-
-
-@api_router.post("/crypto/deposits/{deposit_id}/confirm")
-async def simulate_confirm_deposit(deposit_id: str, user=Depends(get_current_user)):
-    """Simulate a blockchain confirmation for a pending deposit."""
-    deposit = await db.crypto_deposits.find_one(
-        {"id": deposit_id, "user_id": user['id']}, {"_id": 0}
-    )
-    if not deposit:
-        raise HTTPException(status_code=404, detail="Deposit not found")
-    if deposit["status"] == "confirmed":
-        raise HTTPException(status_code=400, detail="Deposit already confirmed")
-
-    new_confirmations = deposit["confirmations"] + 1
-    update = {"confirmations": new_confirmations}
-
-    if new_confirmations >= deposit["required_confirmations"]:
-        update["status"] = "confirmed"
-        update["confirmed_at"] = datetime.now(timezone.utc).isoformat()
-
-        # Credit the wallet
-        await db.wallets.update_one(
-            {"user_id": user['id']},
-            {"$inc": {"sc_balance": deposit["sc_amount"]}}
-        )
-        await db.transactions.insert_one({
-            "id": str(uuid.uuid4()),
-            "user_id": user['id'],
-            "type": "crypto_deposit",
-            "amount": deposit["sc_amount"],
-            "currency": "sc",
-            "description": f"Crypto deposit: {deposit['amount_crypto']} {deposit['crypto_type'].upper()} (${deposit['usd_value']}) = {deposit['sc_amount']} SC",
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
-
-    await db.crypto_deposits.update_one({"id": deposit_id}, {"$set": update})
-
-    return {
-        "deposit_id": deposit_id,
-        "confirmations": new_confirmations,
-        "required": deposit["required_confirmations"],
-        "status": update.get("status", "pending"),
-        "sc_credited": deposit["sc_amount"] if update.get("status") == "confirmed" else 0,
-    }
-
-
-# ─── Leaderboard ───
-
-@api_router.get("/leaderboard")
-async def get_leaderboard():
-    # Top agents by wins
-    agents = await db.agents.find({}, {"_id": 0}).sort("wins", -1).to_list(20)
-
-    # Top bettors by total winnings (aggregate)
-    pipeline = [
-        {"$match": {"status": "won"}},
-        {"$group": {"_id": "$user_id", "username": {"$first": "$username"}, "total_won": {"$sum": "$payout"}, "bets_won": {"$sum": 1}}},
-        {"$sort": {"total_won": -1}},
-        {"$limit": 20}
-    ]
-    top_bettors = await db.bets.aggregate(pipeline).to_list(20)
-    for b in top_bettors:
-        b['user_id'] = b.pop('_id')
-
-    return {"top_agents": agents, "top_bettors": top_bettors}
-
-
-# ─── WebSocket ───
-
-@app.websocket("/api/ws/table/{table_id}")
-async def websocket_table(websocket: WebSocket, table_id: str):
-    await table_mgr.connect(table_id, websocket)
-    try:
-        table = await db.tables.find_one({"id": table_id}, {"_id": 0})
-        if table and table.get('current_game_id'):
-            game = await db.games.find_one({"id": table['current_game_id']}, {"_id": 0})
-            if game:
-                await websocket.send_json({"type": "game_state", "game": sanitize_game_for_response(game)})
-
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        await table_mgr.disconnect(table_id, websocket)
-    except Exception:
-        await table_mgr.disconnect(table_id, websocket)
-
-
-# ─── Tournaments ───
-
-TOURNEY_NAMES = [
-    "Claw Championship", "Moltbook Masters", "Deep Stack Showdown",
-    "OpenClaw Open", "Agent Arena Finals", "Bot Battle Royale",
-]
-
-@api_router.get("/tournaments")
-async def list_tournaments():
-    return await db.tournaments.find({}, {"_id": 0}).sort("created_at", -1).to_list(50)
-
-
-@api_router.get("/tournaments/{tournament_id}")
-async def get_tournament(tournament_id: str):
-    t = await db.tournaments.find_one({"id": tournament_id}, {"_id": 0})
-    if not t:
-        raise HTTPException(status_code=404, detail="Tournament not found")
-    return t
-
-
-@api_router.post("/tournaments")
-async def create_tournament(user=Depends(get_current_user)):
-    agents = await db.agents.find({}, {"_id": 0}).to_list(100)
-    if len(agents) < 8:
-        raise HTTPException(status_code=400, detail="Need at least 8 agents")
-
-    picked = random.sample(agents, 8)
-    random.shuffle(picked)
-    agent_ids = [a['id'] for a in picked]
-
-    tid = str(uuid.uuid4())
-    tournament = {
-        "id": tid,
-        "name": random.choice(TOURNEY_NAMES),
-        "status": "lobby",
-        "agent_ids": agent_ids,
-        "bracket": {
-            "semi_1": {"agent_ids": agent_ids[:4], "game_id": None, "winners": [], "complete": False, "game_phase": None},
-            "semi_2": {"agent_ids": agent_ids[4:], "game_id": None, "winners": [], "complete": False, "game_phase": None},
-            "final": {"agent_ids": [], "game_id": None, "winner": None, "complete": False, "game_phase": None},
-        },
-        "champion_id": None,
-        "champion_name": None,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "completed_at": None,
-    }
-    await db.tournaments.insert_one(tournament)
-    return {k: v for k, v in tournament.items() if k != '_id'}
-
-
-async def _create_tournament_game(agent_ids_list):
-    """Create a tournament game, return game_id."""
-    agents = []
-    for aid in agent_ids_list:
-        agent = await db.agents.find_one({"id": aid}, {"_id": 0})
-        if agent:
-            agents.append(agent)
-
-    deck = create_deck()
-    game_id = str(uuid.uuid4())
-    players = []
-    for i, agent in enumerate(agents):
-        players.append({
-            "agent_id": agent['id'], "agent_name": agent['name'],
-            "avatar_url": agent['avatar_url'], "strategy": agent['strategy'],
-            "hole_cards": [], "chips": 1000, "current_bet": 0,
-            "total_bet": 0, "folded": False, "is_dealer": i == 0,
-            "hand_rank": 0, "hand_name": ""
-        })
-
-    game = {
-        "id": game_id, "table_id": None, "phase": "waiting",
-        "players": players, "community_cards": [], "pot": 0,
-        "deck": deck, "dealer_index": 0, "actions_log": [],
-        "current_actor": None, "turn_index": 0,
-        "round_bet": 0, "round_phase": None, "last_action": None,
-        "winner_id": None, "winner_name": None, "winning_hand": None,
-        "house_rake": 0, "final_pot": 0,
-        "created_at": datetime.now(timezone.utc).isoformat(), "completed_at": None
-    }
-    await db.games.insert_one(game)
-    return game_id
-
-
-async def _advance_tournament_game(game_id):
-    """Advance a tournament game by one step. With turn-by-turn, this
-    processes a single agent action or phase transition."""
-    game = await db.games.find_one({"id": game_id}, {"_id": 0})
-    if not game or game['phase'] == 'complete':
-        return game
-
-    updated = advance_game(game)
-    if updated['phase'] == 'complete':
-        updated['completed_at'] = datetime.now(timezone.utc).isoformat()
-
-    save_doc = {k: v for k, v in updated.items() if k != '_id'}
-    await db.games.replace_one({"id": game_id}, save_doc)
-    return updated
-
-
-async def _play_tournament_game_to_completion(game_id, max_steps=200):
-    """Play a tournament game to completion by advancing until done."""
-    for _ in range(max_steps):
-        game = await _advance_tournament_game(game_id)
-        if not game or game['phase'] == 'complete':
-            return game
-    return await db.games.find_one({"id": game_id}, {"_id": 0})
-
-
-def _get_top2(game):
-    """Get top 2 agent_ids from a completed game (winner + runner-up)."""
-    if not game or game['phase'] != 'complete':
-        return []
-    winner_id = game.get('winner_id')
-    players = game.get('players', [])
-    active = [p for p in players if not p.get('folded') and p['agent_id'] != winner_id]
-    active.sort(key=lambda p: (p.get('hand_rank', 0), p.get('chips', 0)), reverse=True)
-    runner_id = active[0]['agent_id'] if active else (players[0]['agent_id'] if players else None)
-    result = [winner_id]
-    if runner_id and runner_id != winner_id:
-        result.append(runner_id)
-    return result
-
-
-@api_router.post("/tournaments/{tournament_id}/advance")
-async def advance_tournament(tournament_id: str, user=Depends(get_current_user)):
-    t = await db.tournaments.find_one({"id": tournament_id}, {"_id": 0})
-    if not t:
-        raise HTTPException(status_code=404, detail="Tournament not found")
-    if t['status'] == 'complete':
-        raise HTTPException(status_code=400, detail="Tournament already complete")
-
-    bracket = t['bracket']
-
-    if t['status'] == 'lobby':
-        # Start semi-finals: create games and play them to completion
-        gid1 = await _create_tournament_game(bracket['semi_1']['agent_ids'])
-        gid2 = await _create_tournament_game(bracket['semi_2']['agent_ids'])
-        bracket['semi_1']['game_id'] = gid1
-        bracket['semi_2']['game_id'] = gid2
-
-        # Play both semis to completion
-        game1 = await _play_tournament_game_to_completion(gid1)
-        game2 = await _play_tournament_game_to_completion(gid2)
-
-        bracket['semi_1']['game_phase'] = 'complete'
-        bracket['semi_1']['complete'] = True
-        bracket['semi_1']['winners'] = _get_top2(game1)
-
-        bracket['semi_2']['game_phase'] = 'complete'
-        bracket['semi_2']['complete'] = True
-        bracket['semi_2']['winners'] = _get_top2(game2)
-
-        # Create final game
-        final_agents = bracket['semi_1']['winners'] + bracket['semi_2']['winners']
-        bracket['final']['agent_ids'] = final_agents
-        gid_final = await _create_tournament_game(final_agents)
-        bracket['final']['game_id'] = gid_final
-        bracket['final']['game_phase'] = 'waiting'
-        t['status'] = 'final'
-
-    elif t['status'] == 'final':
-        final = bracket['final']
-        if not final['complete'] and final['game_id']:
-            game = await _advance_tournament_game(final['game_id'])
-            display_phase = {
-                'preflop_betting': 'preflop', 'flop_deal': 'flop',
-                'flop_betting': 'flop', 'turn_deal': 'turn',
-                'turn_betting': 'turn', 'river_deal': 'river',
-                'river_betting': 'river',
-            }
-            final['game_phase'] = display_phase.get(game['phase'], game['phase']) if game else None
-            if game and game['phase'] == 'complete':
-                final['complete'] = True
-                final['winner'] = game.get('winner_id')
-                t['champion_id'] = game.get('winner_id')
-                t['champion_name'] = game.get('winner_name')
-                t['status'] = 'complete'
-                t['completed_at'] = datetime.now(timezone.utc).isoformat()
-
-                # Settle tournament bets
-                bets = await db.tournament_bets.find(
-                    {"tournament_id": tournament_id, "status": "pending"}, {"_id": 0}
-                ).to_list(1000)
-                total_pool = sum(b['amount'] for b in bets)
-                winning_bets = [b for b in bets if b['agent_id'] == t['champion_id']]
-                total_winning = sum(b['amount'] for b in winning_bets)
-
-                for bet in bets:
-                    if bet['agent_id'] == t['champion_id'] and total_winning > 0:
-                        payout = int((bet['amount'] / total_winning) * total_pool * 0.8)
-                        await db.tournament_bets.update_one(
-                            {"id": bet['id']}, {"$set": {"status": "won", "payout": payout}})
-                        cf = f"{bet['currency']}_balance"
-                        await db.wallets.update_one({"user_id": bet['user_id']}, {"$inc": {cf: payout}})
-                        await db.transactions.insert_one({
-                            "id": str(uuid.uuid4()), "user_id": bet['user_id'],
-                            "type": "tournament_won", "amount": payout,
-                            "currency": bet['currency'],
-                            "description": f"Won tournament bet on {t['champion_name']}",
-                            "created_at": datetime.now(timezone.utc).isoformat()
-                        })
-                    else:
-                        await db.tournament_bets.update_one(
-                            {"id": bet['id']}, {"$set": {"status": "lost", "payout": 0}})
-
-    t['bracket'] = bracket
-    save_doc = {k: v for k, v in t.items() if k != '_id'}
-    await db.tournaments.replace_one({"id": tournament_id}, save_doc)
-    return save_doc
-
-
-@api_router.post("/tournament-bets")
-async def place_tournament_bet(req: TournamentBetRequest, user=Depends(get_current_user)):
-    t = await db.tournaments.find_one({"id": req.tournament_id}, {"_id": 0})
-    if not t:
-        raise HTTPException(status_code=404, detail="Tournament not found")
-    if t['status'] == 'complete':
-        raise HTTPException(status_code=400, detail="Tournament already complete")
-
-    # Check agent is in tournament
-    if req.agent_id not in t.get('agent_ids', []):
-        raise HTTPException(status_code=400, detail="Agent not in this tournament")
-
-    wallet = await db.wallets.find_one({"user_id": user['id']}, {"_id": 0})
-    cf = f"{req.currency}_balance"
-    if not wallet or wallet.get(cf, 0) < req.amount:
-        raise HTTPException(status_code=400, detail="Insufficient balance")
-
-    await db.wallets.update_one({"user_id": user['id']}, {"$inc": {cf: -req.amount}})
-
-    bet = {
-        "id": str(uuid.uuid4()), "user_id": user['id'], "username": user['username'],
-        "tournament_id": req.tournament_id, "agent_id": req.agent_id,
-        "amount": req.amount, "currency": req.currency,
-        "status": "pending", "payout": 0,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    await db.tournament_bets.insert_one(bet)
-
-    await db.transactions.insert_one({
-        "id": str(uuid.uuid4()), "user_id": user['id'],
-        "type": "tournament_bet", "amount": -req.amount,
-        "currency": req.currency,
-        "description": "Tournament bet placed",
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
-    return {"id": bet['id'], "status": "pending"}
-
-
 # ─── Startup - Seed Data ───
 
 @app.on_event("startup")
 async def seed_data():
-    # Seed house agents
     agent_count = await db.agents.count_documents({"is_house": True})
     if agent_count == 0:
-        # Check if old agents exist without is_house flag
         old_count = await db.agents.count_documents({})
         if old_count > 0:
-            # Tag existing agents as house agents
             await db.agents.update_many(
                 {"is_house": {"$exists": False}},
                 {"$set": {"is_house": True, "owner_id": None}}
@@ -1378,56 +142,31 @@ async def seed_data():
             logger.info("Seeding house agents...")
             for preset in AGENT_PRESETS:
                 agent = {
-                    "id": str(uuid.uuid4()),
-                    "name": preset['name'],
+                    "id": str(uuid.uuid4()), "name": preset['name'],
                     "strategy": preset['strategy'],
                     "avatar_url": AVATAR_URLS[preset['avatar_index']],
-                    "tagline": preset['tagline'],
-                    "owner_id": None,
-                    "is_house": True,
-                    "wins": 0,
-                    "losses": 0,
-                    "total_games": 0,
-                    "total_chips_won": 0,
+                    "tagline": preset['tagline'], "owner_id": None, "is_house": True,
+                    "wins": 0, "losses": 0, "total_games": 0, "total_chips_won": 0,
                     "created_at": datetime.now(timezone.utc).isoformat()
                 }
                 await db.agents.insert_one(agent)
 
     # Seed/update tables
     agents = await db.agents.find({}, {"_id": 0}).to_list(100)
-    agent_ids = [a['id'] for a in agents]
-
-    tables_config = [
-        {"name": "The Claw Pit", "min_bet": 10, "max_bet": 500,
-         "agent_slice": (0, 4), "description": "High-stakes action with the fiercest bots"},
-        {"name": "Moltbook Arena", "min_bet": 5, "max_bet": 200,
-         "agent_slice": (0, 5), "description": "5-way battle where legends are born"},
-        {"name": "Deep Stack Den", "min_bet": 20, "max_bet": 1000,
-         "agent_slice": (0, 6), "description": "6-handed deep-pocket showdown"},
+    table_configs = [
+        {"name": "The Claw Pit", "agent_count": 4, "min_bet": 10, "max_bet": 500},
+        {"name": "Moltbook Arena", "agent_count": 5, "min_bet": 25, "max_bet": 1000},
+        {"name": "Deep Stack Den", "agent_count": 6, "min_bet": 50, "max_bet": 2000},
     ]
 
-    for config in tables_config:
-        existing = await db.tables.find_one({"name": config["name"]}, {"_id": 0})
-        target_ids = agent_ids[config["agent_slice"][0]:config["agent_slice"][1]]
-
-        if existing:
-            if len(existing.get("agent_ids", [])) != len(target_ids):
-                await db.tables.update_one(
-                    {"name": config["name"]},
-                    {"$set": {"agent_ids": target_ids, "description": config["description"],
-                              "current_game_id": None}}
-                )
-                logger.info(f"Updated {config['name']} to {len(target_ids)} agents")
-        else:
+    for cfg in table_configs:
+        existing = await db.tables.find_one({"name": cfg['name']}, {"_id": 0})
+        if not existing and len(agents) >= cfg['agent_count']:
+            selected = [a['id'] for a in agents[:cfg['agent_count']]]
             table = {
-                "id": str(uuid.uuid4()),
-                "name": config["name"],
-                "min_bet": config["min_bet"],
-                "max_bet": config["max_bet"],
-                "agent_ids": target_ids,
-                "current_game_id": None,
-                "status": "active",
-                "description": config["description"],
+                "id": str(uuid.uuid4()), "name": cfg['name'],
+                "min_bet": cfg['min_bet'], "max_bet": cfg['max_bet'],
+                "agent_ids": selected, "current_game_id": None, "status": "waiting",
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
             await db.tables.insert_one(table)
@@ -1435,17 +174,26 @@ async def seed_data():
     logger.info("PokerClaw backend ready!")
 
 
-# ─── Include Router + CORS ───
+# ─── Include Routers + CORS ───
 
-app.include_router(api_router)
+app.include_router(auth_router)
+app.include_router(agents_router)
+app.include_router(tables_router)
+app.include_router(bets_router)
+app.include_router(wallet_router)
+app.include_router(stripe_router)
+app.include_router(crypto_router)
+app.include_router(tournaments_router)
+app.include_router(leaderboard_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
     allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
