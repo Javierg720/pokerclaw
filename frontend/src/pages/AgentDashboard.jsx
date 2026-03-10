@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Navigation } from '../components/Navigation';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { Bot, Zap, Trophy, Copy, Check, TrendingUp, Wallet } from 'lucide-react';
+import { Bot, Zap, Trophy, Copy, Check, TrendingUp, Wallet, Crown, X, Clock, RefreshCw, Coins } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from 'sonner';
 
@@ -51,26 +51,132 @@ function CryptoAddress({ type, address }) {
   );
 }
 
+function ActivityItem({ item }) {
+  const isWin = item.result === 'win';
+  const timeAgo = getTimeAgo(item.completed_at);
+
+  return (
+    <div
+      className={`glass rounded-xl p-3 border-l-2 transition-all ${
+        isWin ? 'border-l-[#FFE600]' : 'border-l-white/10'
+      }`}
+      data-testid={`activity-${item.game_id}`}
+    >
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-2">
+          {isWin ? (
+            <Crown size={14} className="text-[#FFE600]" />
+          ) : (
+            <X size={14} className="text-white/30" />
+          )}
+          <span className={`text-xs font-bold ${isWin ? 'text-[#FFE600]' : 'text-white/40'}`}>
+            {isWin ? 'VICTORY' : 'DEFEAT'}
+          </span>
+        </div>
+        <span className="text-[9px] text-white/20 flex items-center gap-1">
+          <Clock size={9} />
+          {timeAgo}
+        </span>
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-[10px] text-white/50">
+            {isWin ? item.hand : item.hand}
+            {item.opponents?.length > 0 && (
+              <span className="text-white/20"> vs {item.opponents.join(', ')}</span>
+            )}
+          </p>
+        </div>
+        <div className="text-right">
+          {isWin ? (
+            <span className="text-xs font-bold text-[#FFE600] mono">
+              +{item.final_pot} chips
+            </span>
+          ) : (
+            <span className="text-xs text-white/20 mono">
+              Pot: {item.pot}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EarningsItem({ txn }) {
+  return (
+    <div className="flex items-center justify-between py-2 border-b border-white/[0.04] last:border-0" data-testid={`earning-${txn.id}`}>
+      <div className="flex items-center gap-2">
+        <div className="w-6 h-6 rounded-full bg-green-500/10 flex items-center justify-center">
+          <Coins size={10} className="text-green-400" />
+        </div>
+        <div>
+          <p className="text-[10px] text-white/60">{txn.description}</p>
+          <p className="text-[8px] text-white/20 mono">{getTimeAgo(txn.created_at)}</p>
+        </div>
+      </div>
+      <span className="text-xs font-bold text-green-400 mono">
+        +{txn.amount} {txn.currency?.toUpperCase()}
+      </span>
+    </div>
+  );
+}
+
+function getTimeAgo(dateStr) {
+  if (!dateStr) return 'recently';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
 export default function AgentDashboard() {
   const { user } = useAuth();
   const [agentData, setAgentData] = useState(null);
+  const [activity, setActivity] = useState([]);
+  const [earnings, setEarnings] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [feedLoading, setFeedLoading] = useState(false);
+
+  const fetchAgent = useCallback(async () => {
+    try {
+      const res = await api.get('/agents/my-agent');
+      setAgentData(res.data);
+    } catch (err) {
+      if (err.response?.status !== 403) {
+        toast.error('Failed to load agent data');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchActivity = useCallback(async (showSpinner) => {
+    if (showSpinner) setFeedLoading(true);
+    try {
+      const res = await api.get('/agents/my-agent/activity');
+      setActivity(res.data.activity || []);
+      setEarnings(res.data.earnings || []);
+    } catch {
+      // silently fail for activity polling
+    } finally {
+      setFeedLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const fetchAgent = async () => {
-      try {
-        const res = await api.get('/agents/my-agent');
-        setAgentData(res.data);
-      } catch (err) {
-        if (err.response?.status !== 403) {
-          toast.error('Failed to load agent data');
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchAgent();
-  }, []);
+    fetchActivity(false);
+  }, [fetchAgent, fetchActivity]);
+
+  // Auto-refresh activity every 8 seconds
+  useEffect(() => {
+    const interval = setInterval(() => fetchActivity(false), 8000);
+    return () => clearInterval(interval);
+  }, [fetchActivity]);
 
   if (loading) {
     return (
@@ -152,6 +258,49 @@ export default function AgentDashboard() {
             </div>
             <p className="text-[10px] text-white/20 mt-1">SweepCoins used for table buy-ins</p>
           </div>
+
+          {/* Live Activity Feed */}
+          <div data-testid="activity-feed">
+            <div className="flex items-center justify-between mb-3 px-1">
+              <h3 className="text-xs font-bold text-white/60 uppercase tracking-widest">
+                Live Activity
+              </h3>
+              <button
+                onClick={() => fetchActivity(true)}
+                data-testid="refresh-activity-btn"
+                className="text-white/30 hover:text-[#00F0FF] transition-colors"
+              >
+                <RefreshCw size={12} className={feedLoading ? 'animate-spin' : ''} />
+              </button>
+            </div>
+            {activity.length > 0 ? (
+              <div className="space-y-2">
+                {activity.slice(0, 8).map((item) => (
+                  <ActivityItem key={item.game_id} item={item} />
+                ))}
+              </div>
+            ) : (
+              <div className="glass rounded-xl p-6 text-center">
+                <Clock size={20} className="text-white/10 mx-auto mb-2" />
+                <p className="text-white/20 text-xs">No game results yet</p>
+                <p className="text-white/10 text-[10px] mt-1">Your agent's battles will appear here in real-time</p>
+              </div>
+            )}
+          </div>
+
+          {/* Earnings Feed */}
+          {earnings.length > 0 && (
+            <div data-testid="earnings-feed">
+              <h3 className="text-xs font-bold text-white/60 uppercase tracking-widest mb-3 px-1">
+                Recent Earnings
+              </h3>
+              <div className="glass rounded-xl p-3">
+                {earnings.slice(0, 5).map((txn) => (
+                  <EarningsItem key={txn.id} txn={txn} />
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Crypto Deposit Addresses */}
           <div>

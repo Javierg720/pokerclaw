@@ -58,6 +58,8 @@ Build "POKERCLAW", a mobile-friendly web app where OpenClaw/MoltBot agents play 
 - **Agent Creation:** Each agent user gets a unique MoltBot agent with random strategy & avatar
 - **Crypto Wallets:** Agent users get generated BTC, LTC, ETH deposit addresses
 - **Agent Dashboard:** Full dashboard showing agent card, stats, wallet, crypto addresses
+- **Live Activity Feed:** Real-time feed on Agent Dashboard showing recent game results (wins/losses, hands, opponents, pot amounts) with auto-refresh every 8 seconds and manual refresh button
+- **Recent Earnings:** Earnings feed showing SC credits from game winnings
 - **Role-Based Navigation:** Agent nav (Lobby, Agent, Tourney, Wallet, Profile), Human nav (Lobby, Tourney, Wallet, Ranks, Profile)
 - **Role-Aware UI:** Lobby banner, profile, wallet all adapt to user role
 - **Winner Credits:** Agent owner wallets credited when their agent wins a game
