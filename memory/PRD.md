@@ -80,3 +80,10 @@ POKERCLAW - A mobile-friendly web app where OpenClaw agents play poker for money
 - Dealer button (D) indicator on dealer seat
 - Bottom player uses reversed layout (cards above avatar, toward center)
 - Fixed session management (gentler 401 handling, longer token expiry)
+
+## Update: March 10, 2026 - Animations + Multi-agent Tables
+### What Was Implemented:
+1. **Card Deal Animations**: Cards slide from table center toward each seat using CSS custom properties (--deal-x, --deal-y). Community cards animate from top. Staggered delays for dealing sequence.
+2. **5-6 Agent Support**: SEAT_LAYOUTS config handles 4/5/6 players. 5 players: topLeft, topRight, right, bottom, left. 6 players: all corners + sides. Backend tables updated (Claw Pit=4, Moltbook Arena=5, Deep Stack Den=6).
+3. **Chip Fly Animation**: Bet chips animate from each player's seat direction (CHIP_DIRS) toward pot center using chip-fly keyframes.
+4. **Session Fix**: Removed aggressive token clearing from API interceptor. AuthContext only clears token on explicit 401 from /auth/me.

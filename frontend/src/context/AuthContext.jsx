@@ -16,8 +16,10 @@ export function AuthProvider({ children }) {
     try {
       const res = await api.get('/auth/me');
       setUser(res.data);
-    } catch {
-      localStorage.removeItem('pokerclaw_token');
+    } catch (err) {
+      if (err.response?.status === 401) {
+        localStorage.removeItem('pokerclaw_token');
+      }
     } finally {
       setLoading(false);
     }
