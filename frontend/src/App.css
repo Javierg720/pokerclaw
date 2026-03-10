@@ -1,34 +1,157 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* PokerClaw App Styles */
+
+/* Bottom Navigation */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: rgba(5, 5, 5, 0.9);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
+/* Main content padding for bottom nav */
+.main-content {
+  padding-bottom: 80px;
+  min-height: 100vh;
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+/* Poker table surface */
+.poker-table-surface {
+  background: radial-gradient(ellipse at center, #0d0d10 0%, #050505 70%);
+  border: 3px solid #1a1a1d;
+  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.8), 0 0 40px rgba(255, 0, 60, 0.1);
 }
 
-.App-link {
-    color: #61dafb;
+/* Playing card */
+.playing-card {
+  aspect-ratio: 2.5 / 3.5;
+  border-radius: 6px;
+  position: relative;
+  transition: transform 0.2s ease;
 }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
+.playing-card:hover {
+  transform: translateY(-4px);
+}
+
+.playing-card-front {
+  background: #fafafa;
+  color: #111;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.playing-card-back {
+  background: linear-gradient(135deg, #FF003C 0%, #990024 100%);
+  border: 1px solid rgba(255, 0, 60, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.playing-card-back::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  background: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 4px,
+    rgba(255, 255, 255, 0.04) 4px,
+    rgba(255, 255, 255, 0.04) 8px
+  );
+}
+
+/* Suit colors */
+.suit-red { color: #FF003C; }
+.suit-black { color: #1a1a2e; }
+
+/* Agent status ring */
+.agent-ring {
+  border-radius: 50%;
+  padding: 3px;
+  transition: all 0.3s ease;
+}
+.agent-ring-active {
+  background: linear-gradient(135deg, #00F0FF, #BD00FF);
+}
+.agent-ring-folded {
+  background: rgba(255, 255, 255, 0.1);
+  opacity: 0.5;
+}
+.agent-ring-winner {
+  background: linear-gradient(135deg, #FFE600, #FF8C00);
+}
+
+/* Betting chip */
+.bet-chip {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  border: 2px dashed rgba(255, 255, 255, 0.3);
+}
+
+/* Action badge */
+.action-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.action-fold { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.4); }
+.action-call { background: rgba(0, 240, 255, 0.15); color: #00F0FF; }
+.action-raise { background: rgba(255, 0, 60, 0.15); color: #FF003C; }
+.action-win { background: rgba(255, 230, 0, 0.15); color: #FFE600; }
+
+/* Sweep toggle */
+.sweep-toggle {
+  display: flex;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.sweep-toggle-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.4);
+}
+.sweep-toggle-btn.active-gc {
+  background: rgba(255, 230, 0, 0.15);
+  color: #FFE600;
+}
+.sweep-toggle-btn.active-sc {
+  background: rgba(0, 240, 255, 0.15);
+  color: #00F0FF;
+}
+
+/* Table card in lobby */
+.table-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 20px;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+.table-card:hover {
+  border-color: rgba(255, 0, 60, 0.3);
+  box-shadow: 0 0 30px rgba(255, 0, 60, 0.1);
+  transform: translateY(-2px);
 }
