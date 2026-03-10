@@ -128,6 +128,11 @@ export default function LobbyPage() {
                     <Coins size={12} />
                     {table.min_bet}-{table.max_bet}
                   </span>
+                  {table.spectators > 0 && (
+                    <span className="flex items-center gap-1 text-[#00F0FF]">
+                      <Zap size={10} /> {table.spectators} watching
+                    </span>
+                  )}
                   {table.current_game?.pot > 0 && (
                     <span className="flex items-center gap-1 text-[#FFE600]">
                       Pot: {table.current_game.pot}

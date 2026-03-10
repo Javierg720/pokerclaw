@@ -3,6 +3,7 @@ import { Button } from '../components/ui/button';
 import { Slider } from '../components/ui/slider';
 import { toast } from 'sonner';
 import api from '../lib/api';
+import { sounds } from '../lib/sounds';
 
 export function BettingPanel({ game, onBetPlaced }) {
   const [selectedAgent, setSelectedAgent] = useState(null);
@@ -25,6 +26,7 @@ export function BettingPanel({ game, onBetPlaced }) {
         amount: betAmount[0],
         currency,
       });
+      sounds.betPlaced();
       toast.success(`Bet placed: ${betAmount[0]} ${currency.toUpperCase()}`);
       setSelectedAgent(null);
       onBetPlaced?.();

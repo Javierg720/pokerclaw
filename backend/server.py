@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -8,6 +8,7 @@ import logging
 import uuid
 import jwt
 import bcrypt
+import random
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -63,6 +64,45 @@ def sanitize_game_for_response(game, show_cards=False):
     return g
 
 
+# ─── WebSocket Manager ───
+
+class TableManager:
+    def __init__(self):
+        self.connections: dict[str, set] = {}
+
+    async def connect(self, table_id: str, ws: WebSocket):
+        await ws.accept()
+        if table_id not in self.connections:
+            self.connections[table_id] = set()
+        self.connections[table_id].add(ws)
+        await self.broadcast_spectators(table_id)
+
+    async def disconnect(self, table_id: str, ws: WebSocket):
+        self.connections.get(table_id, set()).discard(ws)
+        await self.broadcast_spectators(table_id)
+
+    def get_count(self, table_id: str) -> int:
+        return len(self.connections.get(table_id, set()))
+
+    async def broadcast_spectators(self, table_id: str):
+        await self.broadcast(table_id, {"type": "spectators", "count": self.get_count(table_id)})
+
+    async def broadcast_game_state(self, table_id: str, game: dict):
+        sanitized = sanitize_game_for_response(game)
+        await self.broadcast(table_id, {"type": "game_state", "game": sanitized})
+
+    async def broadcast(self, table_id: str, message: dict):
+        dead = set()
+        for ws in self.connections.get(table_id, set()).copy():
+            try:
+                await ws.send_json(message)
+            except Exception:
+                dead.add(ws)
+        self.connections.get(table_id, set()).difference_update(dead)
+
+table_mgr = TableManager()
+
+
 # ─── Models ───
 
 class SignupRequest(BaseModel):
@@ -86,6 +126,12 @@ class PurchaseRequest(BaseModel):
 
 class CashoutRequest(BaseModel):
     amount: int
+
+class TournamentBetRequest(BaseModel):
+    tournament_id: str
+    agent_id: str
+    amount: int
+    currency: str = "gc"
 
 
 # ─── Auth ───
@@ -178,8 +224,8 @@ async def list_agents():
 @api_router.get("/tables")
 async def list_tables():
     tables = await db.tables.find({}, {"_id": 0}).to_list(100)
-    # Attach current game info
     for table in tables:
+        table['spectators'] = table_mgr.get_count(table['id'])
         if table.get('current_game_id'):
             game = await db.games.find_one({"id": table['current_game_id']}, {"_id": 0, "deck": 0})
             if game:
@@ -267,6 +313,7 @@ async def start_game(table_id: str, user=Depends(get_current_user)):
     await db.games.insert_one(game)
     await db.tables.update_one({"id": table_id}, {"$set": {"current_game_id": game_id}})
 
+    await table_mgr.broadcast_game_state(table_id, game)
     return sanitize_game_for_response(game)
 
 
@@ -334,6 +381,11 @@ async def advance_game_endpoint(game_id: str, user=Depends(get_current_user)):
     # Save to DB (remove _id if present to avoid issues)
     save_doc = {k: v for k, v in updated.items() if k != '_id'}
     await db.games.replace_one({"id": game_id}, save_doc)
+
+    # Broadcast to spectators
+    table_id = updated.get('table_id')
+    if table_id:
+        await table_mgr.broadcast_game_state(table_id, updated)
 
     return sanitize_game_for_response(updated)
 
@@ -489,6 +541,261 @@ async def get_leaderboard():
         b['user_id'] = b.pop('_id')
 
     return {"top_agents": agents, "top_bettors": top_bettors}
+
+
+# ─── WebSocket ───
+
+@app.websocket("/api/ws/table/{table_id}")
+async def websocket_table(websocket: WebSocket, table_id: str):
+    await table_mgr.connect(table_id, websocket)
+    try:
+        table = await db.tables.find_one({"id": table_id}, {"_id": 0})
+        if table and table.get('current_game_id'):
+            game = await db.games.find_one({"id": table['current_game_id']}, {"_id": 0})
+            if game:
+                await websocket.send_json({"type": "game_state", "game": sanitize_game_for_response(game)})
+
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await table_mgr.disconnect(table_id, websocket)
+    except Exception:
+        await table_mgr.disconnect(table_id, websocket)
+
+
+# ─── Tournaments ───
+
+TOURNEY_NAMES = [
+    "Claw Championship", "Moltbook Masters", "Deep Stack Showdown",
+    "OpenClaw Open", "Agent Arena Finals", "Bot Battle Royale",
+]
+
+@api_router.get("/tournaments")
+async def list_tournaments():
+    return await db.tournaments.find({}, {"_id": 0}).sort("created_at", -1).to_list(50)
+
+
+@api_router.get("/tournaments/{tournament_id}")
+async def get_tournament(tournament_id: str):
+    t = await db.tournaments.find_one({"id": tournament_id}, {"_id": 0})
+    if not t:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+    return t
+
+
+@api_router.post("/tournaments")
+async def create_tournament(user=Depends(get_current_user)):
+    agents = await db.agents.find({}, {"_id": 0}).to_list(100)
+    if len(agents) < 8:
+        raise HTTPException(status_code=400, detail="Need at least 8 agents")
+
+    picked = random.sample(agents, 8)
+    random.shuffle(picked)
+    agent_ids = [a['id'] for a in picked]
+
+    tid = str(uuid.uuid4())
+    tournament = {
+        "id": tid,
+        "name": random.choice(TOURNEY_NAMES),
+        "status": "lobby",
+        "agent_ids": agent_ids,
+        "bracket": {
+            "semi_1": {"agent_ids": agent_ids[:4], "game_id": None, "winners": [], "complete": False, "game_phase": None},
+            "semi_2": {"agent_ids": agent_ids[4:], "game_id": None, "winners": [], "complete": False, "game_phase": None},
+            "final": {"agent_ids": [], "game_id": None, "winner": None, "complete": False, "game_phase": None},
+        },
+        "champion_id": None,
+        "champion_name": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+    }
+    await db.tournaments.insert_one(tournament)
+    return {k: v for k, v in tournament.items() if k != '_id'}
+
+
+async def _create_tournament_game(agent_ids_list):
+    """Create and fully play a tournament game, return the game doc."""
+    agents = []
+    for aid in agent_ids_list:
+        agent = await db.agents.find_one({"id": aid}, {"_id": 0})
+        if agent:
+            agents.append(agent)
+
+    deck = create_deck()
+    game_id = str(uuid.uuid4())
+    players = []
+    for i, agent in enumerate(agents):
+        players.append({
+            "agent_id": agent['id'], "agent_name": agent['name'],
+            "avatar_url": agent['avatar_url'], "strategy": agent['strategy'],
+            "hole_cards": [], "chips": 1000, "current_bet": 0,
+            "total_bet": 0, "folded": False, "is_dealer": i == 0,
+            "hand_rank": 0, "hand_name": ""
+        })
+
+    game = {
+        "id": game_id, "table_id": None, "phase": "waiting",
+        "players": players, "community_cards": [], "pot": 0,
+        "deck": deck, "dealer_index": 0, "actions_log": [],
+        "winner_id": None, "winner_name": None, "winning_hand": None,
+        "house_rake": 0, "final_pot": 0,
+        "created_at": datetime.now(timezone.utc).isoformat(), "completed_at": None
+    }
+    await db.games.insert_one(game)
+    return game_id
+
+
+async def _advance_tournament_game(game_id):
+    """Advance a tournament game by one phase, return updated game."""
+    game = await db.games.find_one({"id": game_id}, {"_id": 0})
+    if not game or game['phase'] == 'complete':
+        return game
+
+    updated = advance_game(game)
+    if updated['phase'] == 'complete':
+        updated['completed_at'] = datetime.now(timezone.utc).isoformat()
+
+    save_doc = {k: v for k, v in updated.items() if k != '_id'}
+    await db.games.replace_one({"id": game_id}, save_doc)
+    return updated
+
+
+def _get_top2(game):
+    """Get top 2 agent_ids from a completed game (winner + runner-up)."""
+    if not game or game['phase'] != 'complete':
+        return []
+    winner_id = game.get('winner_id')
+    players = game.get('players', [])
+    active = [p for p in players if not p.get('folded') and p['agent_id'] != winner_id]
+    active.sort(key=lambda p: (p.get('hand_rank', 0), p.get('chips', 0)), reverse=True)
+    runner_id = active[0]['agent_id'] if active else (players[0]['agent_id'] if players else None)
+    result = [winner_id]
+    if runner_id and runner_id != winner_id:
+        result.append(runner_id)
+    return result
+
+
+@api_router.post("/tournaments/{tournament_id}/advance")
+async def advance_tournament(tournament_id: str, user=Depends(get_current_user)):
+    t = await db.tournaments.find_one({"id": tournament_id}, {"_id": 0})
+    if not t:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+    if t['status'] == 'complete':
+        raise HTTPException(status_code=400, detail="Tournament already complete")
+
+    bracket = t['bracket']
+
+    if t['status'] == 'lobby':
+        # Start semi-finals: create games
+        gid1 = await _create_tournament_game(bracket['semi_1']['agent_ids'])
+        gid2 = await _create_tournament_game(bracket['semi_2']['agent_ids'])
+        bracket['semi_1']['game_id'] = gid1
+        bracket['semi_2']['game_id'] = gid2
+        bracket['semi_1']['game_phase'] = 'waiting'
+        bracket['semi_2']['game_phase'] = 'waiting'
+        t['status'] = 'semis'
+
+    elif t['status'] == 'semis':
+        # Advance semi games
+        for semi_key in ['semi_1', 'semi_2']:
+            semi = bracket[semi_key]
+            if not semi['complete'] and semi['game_id']:
+                game = await _advance_tournament_game(semi['game_id'])
+                semi['game_phase'] = game.get('phase', 'unknown') if game else None
+                if game and game['phase'] == 'complete':
+                    semi['complete'] = True
+                    semi['winners'] = _get_top2(game)
+
+        # If both semis done, create final
+        if bracket['semi_1']['complete'] and bracket['semi_2']['complete']:
+            final_agents = bracket['semi_1']['winners'] + bracket['semi_2']['winners']
+            bracket['final']['agent_ids'] = final_agents
+            gid_final = await _create_tournament_game(final_agents)
+            bracket['final']['game_id'] = gid_final
+            bracket['final']['game_phase'] = 'waiting'
+            t['status'] = 'final'
+
+    elif t['status'] == 'final':
+        final = bracket['final']
+        if not final['complete'] and final['game_id']:
+            game = await _advance_tournament_game(final['game_id'])
+            final['game_phase'] = game.get('phase', 'unknown') if game else None
+            if game and game['phase'] == 'complete':
+                final['complete'] = True
+                final['winner'] = game.get('winner_id')
+                t['champion_id'] = game.get('winner_id')
+                t['champion_name'] = game.get('winner_name')
+                t['status'] = 'complete'
+                t['completed_at'] = datetime.now(timezone.utc).isoformat()
+
+                # Settle tournament bets
+                bets = await db.tournament_bets.find(
+                    {"tournament_id": tournament_id, "status": "pending"}, {"_id": 0}
+                ).to_list(1000)
+                total_pool = sum(b['amount'] for b in bets)
+                winning_bets = [b for b in bets if b['agent_id'] == t['champion_id']]
+                total_winning = sum(b['amount'] for b in winning_bets)
+
+                for bet in bets:
+                    if bet['agent_id'] == t['champion_id'] and total_winning > 0:
+                        payout = int((bet['amount'] / total_winning) * total_pool * 0.8)
+                        await db.tournament_bets.update_one(
+                            {"id": bet['id']}, {"$set": {"status": "won", "payout": payout}})
+                        cf = f"{bet['currency']}_balance"
+                        await db.wallets.update_one({"user_id": bet['user_id']}, {"$inc": {cf: payout}})
+                        await db.transactions.insert_one({
+                            "id": str(uuid.uuid4()), "user_id": bet['user_id'],
+                            "type": "tournament_won", "amount": payout,
+                            "currency": bet['currency'],
+                            "description": f"Won tournament bet on {t['champion_name']}",
+                            "created_at": datetime.now(timezone.utc).isoformat()
+                        })
+                    else:
+                        await db.tournament_bets.update_one(
+                            {"id": bet['id']}, {"$set": {"status": "lost", "payout": 0}})
+
+    t['bracket'] = bracket
+    save_doc = {k: v for k, v in t.items() if k != '_id'}
+    await db.tournaments.replace_one({"id": tournament_id}, save_doc)
+    return save_doc
+
+
+@api_router.post("/tournament-bets")
+async def place_tournament_bet(req: TournamentBetRequest, user=Depends(get_current_user)):
+    t = await db.tournaments.find_one({"id": req.tournament_id}, {"_id": 0})
+    if not t:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+    if t['status'] == 'complete':
+        raise HTTPException(status_code=400, detail="Tournament already complete")
+
+    # Check agent is in tournament
+    if req.agent_id not in t.get('agent_ids', []):
+        raise HTTPException(status_code=400, detail="Agent not in this tournament")
+
+    wallet = await db.wallets.find_one({"user_id": user['id']}, {"_id": 0})
+    cf = f"{req.currency}_balance"
+    if not wallet or wallet.get(cf, 0) < req.amount:
+        raise HTTPException(status_code=400, detail="Insufficient balance")
+
+    await db.wallets.update_one({"user_id": user['id']}, {"$inc": {cf: -req.amount}})
+
+    bet = {
+        "id": str(uuid.uuid4()), "user_id": user['id'], "username": user['username'],
+        "tournament_id": req.tournament_id, "agent_id": req.agent_id,
+        "amount": req.amount, "currency": req.currency,
+        "status": "pending", "payout": 0,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.tournament_bets.insert_one(bet)
+
+    await db.transactions.insert_one({
+        "id": str(uuid.uuid4()), "user_id": user['id'],
+        "type": "tournament_bet", "amount": -req.amount,
+        "currency": req.currency,
+        "description": f"Tournament bet placed",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    return {"id": bet['id'], "status": "pending"}
 
 
 # ─── Startup - Seed Data ───

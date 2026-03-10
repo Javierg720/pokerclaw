@@ -1,13 +1,15 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { PlayingCard } from '../components/PlayingCard';
 import { BettingPanel } from '../components/BettingPanel';
 import { Navigation } from '../components/Navigation';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { ArrowLeft, Play, SkipForward, Zap, Crown } from 'lucide-react';
+import { ArrowLeft, Play, SkipForward, Zap, Crown, Volume2, VolumeX, Eye } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from 'sonner';
+import { sounds } from '../lib/sounds';
+import { useTableSocket } from '../lib/useWebSocket';
 
 const PHASE_LABELS = {
   waiting: 'Waiting',
@@ -260,6 +262,11 @@ export default function TablePage() {
   const [autoPlay, setAutoPlay] = useState(false);
   const [advancing, setAdvancing] = useState(false);
   const [actions, setActions] = useState([]);
+  const [soundOn, setSoundOn] = useState(sounds.isEnabled());
+  const prevPhaseRef = useRef(null);
+
+  // WebSocket for real-time updates
+  const { gameState: wsGame, spectators, connected } = useTableSocket(tableId);
 
   const fetchTable = useCallback(async () => {
     try {
@@ -276,11 +283,45 @@ export default function TablePage() {
 
   useEffect(() => { fetchTable(); }, [fetchTable]);
 
+  // Apply WebSocket game updates
+  useEffect(() => {
+    if (wsGame) {
+      setGame(wsGame);
+      setActions(wsGame.actions_log || []);
+    }
+  }, [wsGame]);
+
+  // Sound effects on phase change
+  useEffect(() => {
+    if (!game) return;
+    const prev = prevPhaseRef.current;
+    const curr = game.phase;
+    prevPhaseRef.current = curr;
+
+    if (!prev || prev === curr) return;
+
+    if (['preflop'].includes(curr)) sounds.cardDeal();
+    if (['flop', 'turn', 'river'].includes(curr)) {
+      sounds.cardFlip();
+      sounds.notification();
+    }
+    if (curr === 'showdown') {
+      if (game.winner_name) sounds.winFanfare();
+    }
+
+    // Play action sounds for latest actions
+    const newActions = game.actions_log?.slice(-4) || [];
+    newActions.forEach((a, i) => {
+      setTimeout(() => sounds.actionSound(a.action), i * 150);
+    });
+  }, [game]);
+
   const startGame = async () => {
     try {
       const res = await api.post(`/tables/${tableId}/start-game`);
       setGame(res.data);
       setActions([]);
+      sounds.cardDeal();
       toast.success('Game started!');
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to start game');
@@ -314,6 +355,11 @@ export default function TablePage() {
     return () => clearTimeout(timer);
   }, [autoPlay, game, advanceGame]);
 
+  const toggleSound = () => {
+    const on = sounds.toggle();
+    setSoundOn(on);
+  };
+
   const canBet = game && !['showdown', 'complete', 'waiting'].includes(game.phase);
   const showCards = game && ['showdown', 'complete'].includes(game.phase);
   const lastActions = actions.slice(-6);
@@ -327,13 +373,22 @@ export default function TablePage() {
         </button>
         <div className="text-center">
           <h2 className="text-sm font-bold text-white">{table?.name || 'Loading...'}</h2>
-          {game && (
-            <Badge variant="outline" className="text-[10px] mt-0.5 border-[#FF003C]/30 text-[#FF003C]">
-              {PHASE_LABELS[game.phase] || game.phase}
-            </Badge>
-          )}
+          <div className="flex items-center justify-center gap-2 mt-0.5">
+            {game && (
+              <Badge variant="outline" className="text-[10px] border-[#FF003C]/30 text-[#FF003C]">
+                {PHASE_LABELS[game.phase] || game.phase}
+              </Badge>
+            )}
+            <span className="flex items-center gap-1 text-[10px] text-white/30">
+              <Eye size={10} />
+              {spectators}
+            </span>
+            {connected && <span className="w-1.5 h-1.5 rounded-full bg-[#00F0FF]" title="Live" />}
+          </div>
         </div>
-        <div className="w-5" />
+        <button onClick={toggleSound} data-testid="sound-toggle" className="text-white/40 hover:text-white transition-colors">
+          {soundOn ? <Volume2 size={18} /> : <VolumeX size={18} />}
+        </button>
       </div>
 
       {!game || game.phase === 'complete' ? (

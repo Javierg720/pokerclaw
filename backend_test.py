@@ -1,6 +1,9 @@
 import requests
 import sys
 import json
+import websocket
+import threading
+import time
 from datetime import datetime
 
 class PokerClawAPITester:
@@ -14,6 +17,8 @@ class PokerClawAPITester:
         self.game_id = None
         self.table_id = None
         self.agent_ids = []
+        self.tournament_id = None
+        self.ws_messages = []
 
     def run_test(self, name, method, endpoint, expected_status, data=None, auth_required=True):
         """Run a single API test"""
@@ -350,6 +355,197 @@ class PokerClawAPITester:
             print(f"   🎯 Top bettors: {len(bettors)}")
         return success
 
+    def test_tournaments(self):
+        """Test tournament endpoints"""
+        # Get existing tournaments
+        success, response = self.run_test(
+            "Get Tournaments",
+            "GET",
+            "tournaments",
+            200,
+            auth_required=False
+        )
+        
+        if success and isinstance(response, list):
+            print(f"   🏆 Found {len(response)} tournaments")
+            if response:
+                print(f"      - First tournament: {response[0].get('name', 'Unknown')} (Status: {response[0].get('status', 'Unknown')})")
+        
+        # Create new tournament 
+        success, response = self.run_test(
+            "Create Tournament",
+            "POST",
+            "tournaments",
+            200
+        )
+        
+        if success and 'id' in response:
+            self.tournament_id = response['id']
+            print(f"   🎮 Tournament created with ID: {self.tournament_id}")
+            print(f"   📝 Tournament name: {response.get('name', 'Unknown')}")
+            print(f"   ⚡ Status: {response.get('status', 'Unknown')}")
+            return True
+        return False
+
+    def test_tournament_details(self):
+        """Test getting tournament details"""
+        if not self.tournament_id:
+            print("❌ No tournament ID available")
+            return False
+            
+        success, response = self.run_test(
+            "Get Tournament Details",
+            "GET",
+            f"tournaments/{self.tournament_id}",
+            200,
+            auth_required=False
+        )
+        
+        if success:
+            print(f"   🎯 Tournament Status: {response.get('status', 'Unknown')}")
+            bracket = response.get('bracket', {})
+            print(f"   🥊 Semi 1 agents: {len(bracket.get('semi_1', {}).get('agent_ids', []))}")
+            print(f"   🥊 Semi 2 agents: {len(bracket.get('semi_2', {}).get('agent_ids', []))}")
+        return success
+
+    def test_advance_tournament(self):
+        """Test advancing tournament through phases"""
+        if not self.tournament_id:
+            print("❌ No tournament ID available") 
+            return False
+            
+        # Advance from lobby to semis
+        success, response = self.run_test(
+            "Start Tournament (Lobby -> Semis)",
+            "POST",
+            f"tournaments/{self.tournament_id}/advance",
+            200
+        )
+        
+        if success:
+            print(f"   📍 Tournament status: {response.get('status', 'Unknown')}")
+            
+            # Try advancing semi games a few times
+            for i in range(3):
+                success, response = self.run_test(
+                    f"Advance Tournament Round {i+1}",
+                    "POST", 
+                    f"tournaments/{self.tournament_id}/advance",
+                    200
+                )
+                
+                if success:
+                    status = response.get('status', 'Unknown')
+                    print(f"   📍 Tournament status after round {i+1}: {status}")
+                    
+                    if status == 'complete':
+                        champion = response.get('champion_name', 'Unknown')
+                        print(f"   🏆 Tournament Champion: {champion}")
+                        break
+                else:
+                    break
+                    
+        return success
+
+    def test_tournament_bet(self):
+        """Test placing tournament bets"""
+        if not self.tournament_id or not self.agent_ids:
+            print("❌ No tournament ID or agent IDs available")
+            return False
+            
+        bet_data = {
+            "tournament_id": self.tournament_id,
+            "agent_id": self.agent_ids[0],
+            "amount": 100,
+            "currency": "gc"
+        }
+        
+        success, response = self.run_test(
+            "Place Tournament Bet", 
+            "POST",
+            "tournament-bets",
+            200,
+            data=bet_data
+        )
+        return success
+
+    def test_websocket_connection(self):
+        """Test WebSocket connection to table"""
+        if not self.table_id:
+            print("❌ No table ID available for WebSocket test")
+            return False
+            
+        # Convert HTTPS URL to WSS
+        ws_url = self.base_url.replace('https://', 'wss://').replace('http://', 'ws://')
+        ws_endpoint = f"{ws_url}/api/ws/table/{self.table_id}"
+        
+        print(f"   🔌 Connecting to: {ws_endpoint}")
+        
+        self.ws_messages = []
+        connection_success = False
+        
+        def on_message(ws, message):
+            try:
+                data = json.loads(message)
+                self.ws_messages.append(data)
+                print(f"   📨 WebSocket message: {data.get('type', 'unknown')}")
+                if data.get('type') == 'spectators':
+                    print(f"      - Spectator count: {data.get('count', 0)}")
+                elif data.get('type') == 'game_state':
+                    game = data.get('game', {})
+                    print(f"      - Game phase: {game.get('phase', 'unknown')}")
+            except Exception as e:
+                print(f"   ⚠️ WebSocket message parse error: {e}")
+        
+        def on_open(ws):
+            nonlocal connection_success
+            connection_success = True
+            print(f"   ✅ WebSocket connected successfully")
+            # Send a test ping
+            if self.token:
+                auth_msg = json.dumps({"type": "auth", "token": self.token})
+                ws.send(auth_msg)
+        
+        def on_error(ws, error):
+            print(f"   ❌ WebSocket error: {error}")
+        
+        def on_close(ws, close_status_code, close_msg):
+            print(f"   🔌 WebSocket closed")
+        
+        try:
+            ws = websocket.WebSocketApp(
+                ws_endpoint,
+                on_message=on_message,
+                on_open=on_open,
+                on_error=on_error,
+                on_close=on_close
+            )
+            
+            # Run WebSocket in a separate thread for a few seconds
+            def run_ws():
+                ws.run_forever()
+                
+            ws_thread = threading.Thread(target=run_ws)
+            ws_thread.daemon = True
+            ws_thread.start()
+            
+            # Wait a bit for connection and messages
+            time.sleep(3)
+            ws.close()
+            
+            if connection_success and len(self.ws_messages) > 0:
+                print(f"   📊 Received {len(self.ws_messages)} WebSocket messages")
+                return True
+            elif connection_success:
+                print(f"   ✅ WebSocket connection successful (no messages received)")
+                return True
+            else:
+                return False
+                
+        except Exception as e:
+            print(f"   ❌ WebSocket connection failed: {e}")
+            return False
+
 def main():
     print("🃏 PokerClaw API Testing Suite")
     print("=" * 50)
@@ -390,6 +586,16 @@ def main():
     print("\n📋 BETTING & LEADERBOARD TESTS")
     tester.test_get_my_bets()
     tester.test_leaderboard()
+    
+    # Test NEW FEATURES - Tournaments and WebSocket
+    print("\n📋 NEW FEATURES TESTS")
+    if tester.test_tournaments():
+        tester.test_tournament_details()
+        tester.test_tournament_bet() 
+        tester.test_advance_tournament()
+    
+    # Test WebSocket connection
+    tester.test_websocket_connection()
     
     # Print results
     print("\n" + "=" * 50)

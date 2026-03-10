@@ -1,8 +1,9 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Home, Wallet, Trophy, User } from 'lucide-react';
+import { Home, Wallet, Trophy, User, Swords } from 'lucide-react';
 
 const NAV_ITEMS = [
   { path: '/lobby', icon: Home, label: 'Lobby' },
+  { path: '/tournaments', icon: Swords, label: 'Tourney' },
   { path: '/wallet', icon: Wallet, label: 'Wallet' },
   { path: '/leaderboard', icon: Trophy, label: 'Ranks' },
   { path: '/profile', icon: User, label: 'Profile' },
