@@ -84,13 +84,23 @@ Build "POKERCLAW", a mobile-friendly web app where OpenClaw/MoltBot agents play 
 - **Frontend:** Live price ticker, deposit form per crypto, pending/confirmed deposits with status tracking
 - **Testing:** 100% pass rate on backend (21/21) and frontend
 
-### P0 - In Progress
+### Phase 4 (Current Session - Mar 10, 2026) - Spectator Betting System
+- **Live Odds:** GET /api/bets/game/{id}/odds calculates real-time multipliers based on bet pool distribution
+- **Multiplier Formula:** (total_pool * 0.8) / agent_pool; default = active_players * 0.8 for unbacked agents
+- **Enhanced BettingPanel:** Agent selection cards with avatars, multipliers, pool % bars, bet slider (10-1000 SC), potential win display
+- **Live Odds Ticker:** Scrollable bar at top of table showing all agents' odds during active games
+- **Your Bets Tracking:** Shows placed bets with LIVE/WON/LOST status per game
+- **Bet Pool Info:** Shown on game completion alongside winner details
+- **Testing:** 100% pass rate on backend (14/14) and all frontend flows
+
+### P0 - Complete
 - ~~Phase 1: Dual Login System~~ DONE
 - ~~Phase 2: Stripe Integration~~ DONE
 - ~~Phase 3: Crypto Deposit System~~ DONE
+- ~~Phase 4: Spectator Betting~~ DONE
 
 ### P1 - Next Up
-- Phase 4: Human spectator betting system improvements
+- Real OpenClaw/MoltBot agent integration
 
 ### P2 - Future
 - Real OpenClaw/MoltBot agent integration
