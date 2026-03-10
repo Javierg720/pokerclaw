@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { PlayingCard } from '../components/PlayingCard';
 import { BettingPanel } from '../components/BettingPanel';
 import { Navigation } from '../components/Navigation';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { ArrowLeft, Play, SkipForward, Zap, Crown, Volume2, VolumeX, Eye } from 'lucide-react';
+import { ArrowLeft, Play, SkipForward, Zap, Crown, Volume2, VolumeX, Eye, TrendingUp } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from 'sonner';
 import { sounds } from '../lib/sounds';
@@ -257,12 +258,14 @@ function PokerTableVisual({ game, showCards }) {
 export default function TablePage() {
   const { tableId } = useParams();
   const navigate = useNavigate();
+  const { isHuman } = useAuth();
   const [table, setTable] = useState(null);
   const [game, setGame] = useState(null);
   const [autoPlay, setAutoPlay] = useState(false);
   const [advancing, setAdvancing] = useState(false);
   const [actions, setActions] = useState([]);
   const [soundOn, setSoundOn] = useState(sounds.isEnabled());
+  const [odds, setOdds] = useState(null);
   const prevPhaseRef = useRef(null);
 
   // WebSocket for real-time updates
@@ -281,7 +284,24 @@ export default function TablePage() {
     }
   }, [tableId]);
 
+  const fetchOdds = useCallback(async () => {
+    if (!game?.id) return;
+    try {
+      const res = await api.get(`/bets/game/${game.id}/odds`);
+      setOdds(res.data);
+    } catch {
+      // silent
+    }
+  }, [game?.id]);
+
   useEffect(() => { fetchTable(); }, [fetchTable]);
+
+  // Fetch odds periodically
+  useEffect(() => {
+    fetchOdds();
+    const interval = setInterval(fetchOdds, 6000);
+    return () => clearInterval(interval);
+  }, [fetchOdds]);
 
   // Apply WebSocket game updates
   useEffect(() => {
@@ -391,6 +411,21 @@ export default function TablePage() {
         </button>
       </div>
 
+      {/* Live Odds Ticker */}
+      {odds && odds.total_pool > 0 && canBet && (
+        <div className="mx-4 mb-2 glass rounded-lg p-2 flex items-center gap-3 overflow-x-auto" data-testid="odds-ticker">
+          <TrendingUp size={12} className="text-[#FFE600] flex-shrink-0" />
+          <span className="text-[9px] text-white/30 flex-shrink-0">LIVE ODDS</span>
+          {odds.odds.filter(o => !o.folded).map(o => (
+            <div key={o.agent_id} className="flex items-center gap-1.5 flex-shrink-0">
+              <img src={o.avatar_url} alt="" className="w-4 h-4 rounded-full" />
+              <span className="text-[9px] text-white/50 truncate max-w-[50px]">{o.agent_name}</span>
+              <span className="text-[10px] font-black text-[#FFE600] mono">{o.multiplier}x</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {!game || game.phase === 'complete' ? (
         /* No active game / Game complete */
         <div className="flex flex-col items-center justify-center px-6 py-16">
@@ -409,6 +444,11 @@ export default function TablePage() {
                   <span className="text-[#FF003C] font-bold ml-1">{game.house_rake}</span>
                 </div>
               </div>
+              {odds && odds.total_pool > 0 && (
+                <div className="mt-3 pt-3 border-t border-white/[0.05] text-xs text-white/30">
+                  Side bet pool: {odds.total_pool} SC ({odds.total_bets} bets)
+                </div>
+              )}
             </div>
           )}
           <Button

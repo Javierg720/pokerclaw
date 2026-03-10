@@ -627,6 +627,53 @@ async def get_game_bets(game_id: str):
     return bets
 
 
+@api_router.get("/bets/game/{game_id}/odds")
+async def get_game_odds(game_id: str):
+    """Calculate live odds based on current bets for a game."""
+    bets = await db.bets.find({"game_id": game_id, "status": "pending"}, {"_id": 0}).to_list(1000)
+    game = await db.games.find_one({"id": game_id}, {"_id": 0})
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    total_pool = sum(b['amount'] for b in bets)
+    agent_pools = {}
+    agent_bet_counts = {}
+    for b in bets:
+        agent_pools[b['agent_id']] = agent_pools.get(b['agent_id'], 0) + b['amount']
+        agent_bet_counts[b['agent_id']] = agent_bet_counts.get(b['agent_id'], 0) + 1
+
+    odds = []
+    for p in game.get('players', []):
+        aid = p['agent_id']
+        pool = agent_pools.get(aid, 0)
+        bets_count = agent_bet_counts.get(aid, 0)
+        # Calculate payout multiplier (how much you win per 1 SC bet)
+        if total_pool > 0 and pool > 0:
+            multiplier = round((total_pool * 0.8) / pool, 2)
+        else:
+            # No bets yet - estimate based on equal distribution
+            active = len([pp for pp in game['players'] if not pp.get('folded')])
+            multiplier = round(active * 0.8, 2) if active > 0 else 1.0
+
+        pct = round((pool / total_pool) * 100, 1) if total_pool > 0 else 0
+        odds.append({
+            "agent_id": aid,
+            "agent_name": p['agent_name'],
+            "avatar_url": p.get('avatar_url'),
+            "pool": pool,
+            "bets_count": bets_count,
+            "pct": pct,
+            "multiplier": multiplier,
+            "folded": p.get('folded', False),
+        })
+
+    return {
+        "total_pool": total_pool,
+        "total_bets": len(bets),
+        "odds": odds,
+    }
+
+
 # ─── Wallet ───
 
 @api_router.get("/wallet")

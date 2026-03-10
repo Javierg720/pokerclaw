@@ -1,0 +1,85 @@
+{
+  "summary": "Phase 4 Enhanced Spectator Betting - All 14/14 backend tests passed and all frontend UI features verified. Betting panel with live odds, multiplier calculation, and agent selection working correctly. Live odds ticker displays at top during active games with bets.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": {
+    "backend": [
+      "GET /api/bets/game/{game_id}/odds returns 404 for non-existent game",
+      "GET /api/bets/game/{game_id}/odds returns proper structure (total_pool, total_bets, odds[])",
+      "Each agent in odds has required fields: agent_id, agent_name, multiplier, pool, bets_count, pct, folded",
+      "Odds multiplier = (total_pool * 0.8) / agent_pool for agents with bets",
+      "Default multiplier = active_players * 0.8 for agents with no bets",
+      "POST /api/bets requires authentication",
+      "POST /api/bets rejects bets for non-existent games (404)",
+      "POST /api/bets rejects bets on agents not in the game (400)",
+      "POST /api/bets creates pending bet for authenticated users",
+      "POST /api/bets rejects bets on completed/showdown games (400)",
+      "GET /api/bets/my-bets requires authentication",
+      "GET /api/bets/my-bets returns user's bet history with proper structure",
+      "Agent users can also place side bets",
+      "Game flow: start game -> advance phases -> complete works correctly"
+    ],
+    "frontend": [
+      "BettingPanel shows during active game phases (preflop, flop, turn, river)",
+      "BettingPanel hidden during waiting/showdown/complete phases (correct behavior)",
+      "BettingPanel shows all active (non-folded) agents with their multipliers",
+      "Multiplier displays correctly (3.2x default for 4 active players with no bets)",
+      "Multiplier updates after bet (0.8x shown for agent with bet)",
+      "Bet amount slider works (10-1000 SC range)",
+      "Agent selection highlighting works",
+      "Place bet button changes from 'SELECT AN AGENT' to 'BET X SC' after selection",
+      "'Bet placed: 50 SC' toast notification shows on success",
+      "'Your Bets' section appears after placing bet with bet details",
+      "'You bet X SC' indicator shows under selected agent",
+      "Live odds ticker shows at top during active game with bets",
+      "Bet pool badge shows (e.g., '1 bets / 50 SC pool')",
+      "Potential win calculation displays after agent selection"
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_spectator_betting.py",
+    "/app/test_reports/pytest/spectator_betting_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_spectator_betting.py"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 tests passed)",
+    "frontend": "100% (all betting panel features verified)"
+  },
+  "test_credentials": {
+    "human_user": "human@test.com / test123",
+    "agent_user": "agent@test.com / test123"
+  },
+  "seed_data_creation": "Test bets created during testing with amounts 50 SC",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase 4 spectator betting fully implemented and tested. BettingPanel component shows live odds polling every 5 seconds from /api/bets/game/{id}/odds. Odds multiplier formula: (total_pool * 0.8) / agent_pool. Default multiplier for no bets: active_players * 0.8. House rake is 20% on the pool. Betting only allowed during active phases (preflop, flop, turn, river). Bet settlement happens on game completion in /api/games/{id}/advance endpoint.",
+  "mocked_apis": {
+    "ai_agent_decisions": "MOCKED - AI agent decisions simulated in game_engine.py",
+    "bet_settlement": "REAL but triggered automatically - Proportional payouts distributed when game completes"
+  },
+  "betting_flow": {
+    "step1": "User views table with active game (preflop/flop/turn/river phase)",
+    "step2": "BettingPanel shows all non-folded agents with live odds multipliers",
+    "step3": "User selects agent and amount (10-1000 SC via slider)",
+    "step4": "Potential win calculation shown (amount * multiplier)",
+    "step5": "User clicks place bet -> POST /api/bets -> deducts SC from wallet",
+    "step6": "Bet added to pool, odds refresh every 5-6 seconds",
+    "step7": "On game complete: winners get proportional payout with 20% house rake"
+  },
+  "verified_multiplier_logic": {
+    "formula_with_bets": "multiplier = (total_pool * 0.8) / agent_pool",
+    "formula_no_bets": "multiplier = active_player_count * 0.8",
+    "example": "4 active players with no bets -> 3.2x multiplier each"
+  }
+}
