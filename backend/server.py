@@ -20,6 +20,7 @@ from routes.stripe_routes import router as stripe_router
 from routes.crypto import router as crypto_router
 from routes.tournaments import router as tournaments_router
 from routes.leaderboard import router as leaderboard_router
+from routes.agent_api import router as agent_api_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
@@ -185,6 +186,7 @@ app.include_router(stripe_router)
 app.include_router(crypto_router)
 app.include_router(tournaments_router)
 app.include_router(leaderboard_router)
+app.include_router(agent_api_router)
 
 app.add_middleware(
     CORSMiddleware,

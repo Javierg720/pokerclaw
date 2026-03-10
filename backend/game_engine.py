@@ -154,10 +154,14 @@ def _get_betting_phase(game_phase):
     return mapping.get(game_phase, 'preflop')
 
 
-def advance_game(game):
+def advance_game(game, external_action=None):
     """
     Turn-by-turn game advancement. Each call processes ONE agent's action
     or a phase transition (dealing cards).
+
+    external_action: Optional dict with {agent_id, action, amount} from an
+    OpenClaw-connected agent. If provided and it matches the current actor,
+    this action is used instead of auto-deciding.
 
     Phase flow:
       waiting -> dealing (deal hole cards)
@@ -190,6 +194,8 @@ def advance_game(game):
         game['turn_index'] = 0
         game['round_bet'] = 20  # Big blind
         game['round_phase'] = 'preflop'
+        active = _get_active_players(players)
+        game['current_actor'] = active[0]['agent_id'] if active else None
 
     # ── BETTING ROUNDS (turn-by-turn) ──
     elif phase in ('preflop_betting', 'flop_betting', 'turn_betting', 'river_betting'):
@@ -220,14 +226,28 @@ def advance_game(game):
             # Process ONE agent's action
             player = active[turn_idx]
             betting_phase = _get_betting_phase(phase)
-            strength = hand_strength(
-                player['hole_cards'],
-                community if community else None
-            )
-            act, amount = agent_decide(
-                player['strategy'], strength, pot,
-                game.get('round_bet', 0), player['chips'], betting_phase
-            )
+
+            # Check if external action was submitted for this agent
+            if (external_action
+                    and external_action.get('agent_id') == player['agent_id']
+                    and external_action.get('action') in ('fold', 'call', 'raise')):
+                act = external_action['action']
+                amount = external_action.get('amount', 0)
+                # Clamp raise amount to available chips
+                if act == 'raise':
+                    amount = max(int(amount), game.get('round_bet', 0) * 2, 20)
+                    amount = min(amount, player['chips'])
+                elif act == 'call':
+                    amount = min(game.get('round_bet', 0), player['chips'])
+            else:
+                strength = hand_strength(
+                    player['hole_cards'],
+                    community if community else None
+                )
+                act, amount = agent_decide(
+                    player['strategy'], strength, pot,
+                    game.get('round_bet', 0), player['chips'], betting_phase
+                )
 
             if act == 'fold':
                 player['folded'] = True

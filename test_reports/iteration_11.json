@@ -1,0 +1,92 @@
+{
+  "summary": "Agent API (OpenClaw Skill) integration tested. All 11 new Agent API endpoints working correctly. Full game loop verified: Register -> Login -> Join table -> Start game -> Advance others -> Get state -> Submit action -> Game completes. Regression tests for regular auth and tables passed. One data migration issue found: stale game on 'Moltbook Arena' table from pre-turn-by-turn engine.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "Moltbook Arena table",
+        "issue": "Stale game (id: 89b57965-400f-449b-9f0e-52057e0b0d8e) has old format (phase='preflop' instead of 'preflop_betting') blocking new agent joins. This is a data migration issue from turn-by-turn engine update.",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": {
+    "agent_api_auth": [
+      "POST /api/agent-api/register - Creates user, agent, wallet, returns JWT token",
+      "POST /api/agent-api/register - Blocks duplicate email registration",
+      "POST /api/agent-api/login - Returns token and agent for valid credentials",
+      "POST /api/agent-api/login - Returns 401 for invalid credentials"
+    ],
+    "agent_api_info": [
+      "GET /api/agent-api/me - Returns agent info and wallet balance",
+      "GET /api/agent-api/me - Returns 401 without token",
+      "GET /api/agent-api/wallet - Returns sc_balance and gc_balance"
+    ],
+    "agent_api_tables": [
+      "GET /api/agent-api/tables - Returns tables with your_agent_seated flag",
+      "POST /api/agent-api/tables/{id}/join - Seats agent at table (when no game in progress)",
+      "POST /api/agent-api/tables/{id}/leave - Removes agent from table"
+    ],
+    "agent_api_game_loop": [
+      "POST /api/agent-api/game/{TABLE_ID}/start - Creates new game, returns game_id and hole cards",
+      "POST /api/agent-api/game/{GAME_ID}/advance-others - Auto-advances house bots until your turn",
+      "GET /api/agent-api/game/{GAME_ID}/state - Shows your hole cards, hides others, includes hand strength",
+      "POST /api/agent-api/game/{GAME_ID}/action - Accepts fold/call/raise actions",
+      "Full game loop played to completion successfully"
+    ],
+    "regression_tests": [
+      "POST /api/auth/signup - Regular user signup works",
+      "POST /api/auth/signup - Agent owner signup works",
+      "POST /api/auth/login - Regular login works",
+      "GET /api/tables - Returns tables correctly",
+      "POST /api/tables/{id}/start-game - Works for regular users",
+      "POST /api/games/{id}/advance - Works for regular users"
+    ],
+    "frontend": [
+      "Homepage loads - Auth page displays correctly with LOGIN/SIGNUP tabs"
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_agent_api.py",
+    "/app/test_reports/pytest/agent_api_results.xml"
+  ],
+  "action_items": [
+    "DATA FIX: Delete or mark as complete the stale game on Moltbook Arena (game_id: 89b57965-400f-449b-9f0e-52057e0b0d8e). This game uses old phase format and blocks new agents from joining."
+  ],
+  "critical_code_review_comments": [
+    "Agent API implementation is solid - proper auth, card hiding for opponents, hand strength calculation",
+    "advance_game function correctly handles external_action parameter for OpenClaw agents",
+    "Consider adding a migration script to fix stale games from pre-turn-by-turn era"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_agent_api.py"
+  ],
+  "success_rate": {
+    "backend": "95% (17/18 tests passed, 1 skipped due to table availability)",
+    "frontend": "100% (homepage loads correctly)"
+  },
+  "test_credentials": {
+    "test_openclaw_agent": "openclaw@test.com / test123 (ClawBot_Alpha, seated at The Claw Pit)"
+  },
+  "seed_data_creation": "Multiple TEST_ prefixed agents created during testing",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Agent API is fully functional. Key endpoints: /api/agent-api/register, /login, /me, /wallet, /tables, /tables/{id}/join, /tables/{id}/leave, /game/{TABLE_ID}/start, /game/{GAME_ID}/state, /game/{GAME_ID}/action, /game/{GAME_ID}/advance-others. Test agent 'openclaw@test.com' (password: test123) is already registered with ClawBot_Alpha seated at 'The Claw Pit'. One stale game on 'Moltbook Arena' needs cleanup.",
+  "mocked_apis": {
+    "ai_agent_decisions": "MOCKED - House bot AI decisions simulated via strategy-based logic in game_engine.py",
+    "crypto_deposits": "MOCKED - Crypto deposit confirmations are simulated"
+  },
+  "agent_api_flow_summary": {
+    "registration": "POST /api/agent-api/register creates user (role=agent) + agent (is_external=true) + wallet",
+    "authentication": "JWT token returned on register/login, use as Bearer token for all endpoints",
+    "table_management": "List tables shows your_agent_seated, join/leave blocked during active games",
+    "game_flow": "start -> advance-others -> state -> action -> repeat until complete",
+    "card_visibility": "Your hole cards always visible, others hidden until showdown/complete",
+    "hand_hints": "state endpoint returns your_hand_strength (0-1), your_current_hand (e.g., 'Two Pair'), your_hand_rank (1-10)"
+  }
+}
