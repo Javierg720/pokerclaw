@@ -1,89 +1,109 @@
-# PokerClaw - Product Requirements Document
+# POKERCLAW - Product Requirements Document
 
 ## Original Problem Statement
-POKERCLAW - A mobile-friendly web app where OpenClaw agents play poker for money. Texas Hold'em with sweepstakes coins (GC/SC). House keeps 20% of pots. Users watch AI agents play and bet on outcomes.
-
-## Architecture
-- **Frontend**: React + Tailwind + shadcn/ui
-- **Backend**: FastAPI (Python)
-- **Database**: MongoDB
-- **Auth**: JWT-based
-
-## User Personas
-1. **Crypto-native gamers** - Want sweepstakes coins redeemable to crypto
-2. **Poker enthusiasts** - Enjoy watching AI play Texas Hold'em
-3. **AI/Agent enthusiasts** - Interested in OpenClaw agent strategies
-4. **Casual bettors** - Want to bet on agent outcomes
+Build "POKERCLAW", a mobile-friendly web app where OpenClaw/MoltBot agents play Texas Hold'em poker. The system supports two account types: **Agent** (autonomous MoltBot agents that play poker, funded via Stripe/crypto) and **Human/Spectator** (watch games and bet on outcomes). Winner takes the pot minus 20% house rake.
 
 ## Core Requirements
-- [x] JWT Authentication (signup/login)
-- [x] 8 pre-seeded OpenClaw AI agents with unique strategies
-- [x] 3 poker tables with different bet ranges
-- [x] Texas Hold'em game engine with full hand evaluation
-- [x] Game phases: waiting->preflop->flop->turn->river->showdown->complete
-- [x] Agent AI decision-making (fold/call/raise based on strategy)
-- [x] Sweepstakes coins (GC free, SC premium/redeemable)
-- [x] Betting system (pari-mutuel with 20% house rake)
-- [x] Wallet with purchase/cashout
-- [x] Leaderboard (top agents + top bettors)
-- [x] Mobile-first dark casino UI
+1. **Dual Login System:** Agent accounts (own a MoltBot that plays) and Human accounts (spectators who bet)
+2. **Agent Economy:** Agents use SweepCoins (SC), purchasable via Stripe or crypto deposits (BTC, LTC, ETH). 1 SC per $1 USD value. 2 confirmations required.
+3. **Human Economy:** Spectators bet SC on game outcomes
+4. **House Rake:** 20% from every pot
+5. **Game:** Texas Hold'em with autonomous AI agents
+6. **UI:** PokerStars-style poker table, mobile-first
+7. **Real-time:** WebSocket updates, animations, sound effects
+8. **Tournaments:** 8-agent bracket (semis → final)
 
-## What's Been Implemented (March 10, 2026)
-### Backend (17 endpoints, 100% tested)
-- Auth: signup, login, me
-- Agents: list all 8 agents
-- Tables: list, get, start-game
-- Games: get, advance
-- Bets: place, my-bets, game-bets
-- Wallet: get, purchase, cashout, transactions
-- Leaderboard: top agents + bettors
+## Tech Stack
+- **Frontend:** React, Tailwind CSS, Shadcn UI, Framer Motion
+- **Backend:** FastAPI, MongoDB (motor), WebSockets
+- **Auth:** JWT-based with role support (agent/human)
 
-### Frontend (6 pages)
-- AuthPage: Login/Signup with PokerClaw branding
-- LobbyPage: Browse 3 tables with LIVE/OPEN status
-- TablePage: Full poker game view with cards, agents, actions, betting
-- WalletPage: GC/SC balances, purchase, cashout, transaction history
-- LeaderboardPage: Top agents + top bettors tabs
-- ProfilePage: User info + logout
+## Architecture
+```
+/app/
+├── backend/
+│   ├── server.py          # Main FastAPI app with all endpoints
+│   ├── game_engine.py     # Texas Hold'em logic & AI
+│   └── requirements.txt
+├── frontend/src/
+│   ├── App.js             # Router with role-based routes
+│   ├── context/AuthContext.jsx  # Auth with role support
+│   ├── lib/api.js, sounds.js, useWebSocket.js
+│   ├── components/Navigation.jsx, BettingPanel.jsx, PlayingCard.jsx
+│   └── pages/
+│       ├── AuthPage.jsx       # Dual role login/signup
+│       ├── LobbyPage.jsx      # Role-aware lobby
+│       ├── TablePage.jsx      # Poker table view
+│       ├── AgentDashboard.jsx  # Agent management
+│       ├── WalletPage.jsx     # Role-aware wallet
+│       ├── TournamentPage.jsx # Tournament bracket
+│       ├── LeaderboardPage.jsx
+│       └── ProfilePage.jsx    # Role-aware profile
+```
 
-### Game Engine
-- Full Texas Hold'em: deck, dealing, 5-card hand evaluation
-- 6 agent strategies: aggressive, conservative, balanced, bluffer, tight_aggressive, loose_passive
-- Community cards: flop (3), turn (1), river (1)
-- Hand rankings: Royal Flush to High Card
+## What's Been Implemented
+
+### Phase 0 (Previous Session) - Core MVP
+- Full-stack scaffolding (FastAPI + React + MongoDB)
+- User auth (JWT), game tables, Texas Hold'em game engine
+- PokerStars-style poker table UI (4/5/6 players)
+- CSS animations (card dealing, chip flying)
+- Sound effects via Web Audio API
+- WebSocket real-time updates
+- Tournament mode (8-agent bracket)
+- Leaderboard, wallet system
+
+### Phase 1 (Current Session - Mar 10, 2026) - Dual Login System
+- **Dual Auth:** Agent and Human/Spectator role selection on signup
+- **Agent Creation:** Each agent user gets a unique MoltBot agent with random strategy & avatar
+- **Crypto Wallets:** Agent users get generated BTC, LTC, ETH deposit addresses
+- **Agent Dashboard:** Full dashboard showing agent card, stats, wallet, crypto addresses
+- **Role-Based Navigation:** Agent nav (Lobby, Agent, Tourney, Wallet, Profile), Human nav (Lobby, Tourney, Wallet, Ranks, Profile)
+- **Role-Aware UI:** Lobby banner, profile, wallet all adapt to user role
+- **Winner Credits:** Agent owner wallets credited when their agent wins a game
+- **Testing:** 100% pass rate on backend (20/20) and frontend
 
 ## Prioritized Backlog
-### P0
-- Real-time game updates (WebSocket)
-- OpenClaw SKILL.md integration for real agent connections
 
-### P1
-- Real crypto cashout via Stripe/crypto integration
-- Game history page
-- Agent profile pages with detailed stats
-- Multi-table spectating
+### P0 - In Progress
+- ~~Phase 1: Dual Login System~~ DONE
 
-### P2
-- Chat/commentary system
-- Sound effects for card deals, wins
-- Push notifications for big wins
-- Tournament mode
+### P1 - Next Up
+- Phase 2: Stripe integration for SweepCoin purchases
+- Phase 3: Crypto deposit system (real monitoring, price feeds)
+- Phase 4: Human spectator betting system improvements
 
-## Update: March 10, 2026 - Poker Table Visual Redesign
-### What Changed:
-- Redesigned TablePage with PokerStars-style oval poker table layout
-- CSS Grid (3x3) positions agents at cardinal points around felt table
-- Dark carbon-fiber felt with POKERCLAW watermark
-- Cards displayed in front of each player's seat position
-- Community cards + pot centered on the table
-- Bet chips float on the table surface near center
-- Dealer button (D) indicator on dealer seat
-- Bottom player uses reversed layout (cards above avatar, toward center)
-- Fixed session management (gentler 401 handling, longer token expiry)
+### P2 - Future
+- Real OpenClaw/MoltBot agent integration
+- Chip movement animations
+- Late join for tournaments
+- Backend refactoring (split server.py into routers)
+- Frontend refactoring (extract TablePage sub-components)
 
-## Update: March 10, 2026 - Animations + Multi-agent Tables
-### What Was Implemented:
-1. **Card Deal Animations**: Cards slide from table center toward each seat using CSS custom properties (--deal-x, --deal-y). Community cards animate from top. Staggered delays for dealing sequence.
-2. **5-6 Agent Support**: SEAT_LAYOUTS config handles 4/5/6 players. 5 players: topLeft, topRight, right, bottom, left. 6 players: all corners + sides. Backend tables updated (Claw Pit=4, Moltbook Arena=5, Deep Stack Den=6).
-3. **Chip Fly Animation**: Bet chips animate from each player's seat direction (CHIP_DIRS) toward pot center using chip-fly keyframes.
-4. **Session Fix**: Removed aggressive token clearing from API interceptor. AuthContext only clears token on explicit 401 from /auth/me.
+## DB Schema
+- **users:** `{ id, username, email, password_hash, role, agent_id, created_at }`
+- **agents:** `{ id, name, strategy, avatar_url, tagline, owner_id, is_house, wins, losses, total_games, total_chips_won }`
+- **wallets:** `{ id, user_id, sc_balance, gc_balance, crypto_addresses, pending_deposits }`
+- **tables:** `{ id, name, min_bet, max_bet, agent_ids, current_game_id, status }`
+- **games:** `{ id, table_id, phase, players, community_cards, pot, deck, winner_id, house_rake, final_pot }`
+- **tournaments:** `{ id, name, status, agent_ids, bracket, champion_id }`
+- **bets/tournament_bets:** `{ id, user_id, game_id/tournament_id, agent_id, amount, currency, status, payout }`
+- **transactions:** `{ id, user_id, type, amount, currency, description }`
+
+## API Endpoints
+- `POST /api/auth/signup` (with role & agent_name)
+- `POST /api/auth/login`
+- `GET /api/auth/me` (returns role & agent data)
+- `GET /api/agents`, `GET /api/agents/my-agent`, `GET /api/agents/{id}`
+- `GET /api/tables`, `GET /api/tables/{id}`, `POST /api/tables/{id}/start-game`
+- `POST /api/games/{id}/advance`
+- `POST /api/bets`, `GET /api/bets/my-bets`, `GET /api/bets/game/{id}`
+- `GET /api/wallet`, `POST /api/wallet/purchase`, `POST /api/wallet/cashout`
+- `GET /api/tournaments`, `POST /api/tournaments`, `POST /api/tournaments/{id}/advance`
+- `POST /api/tournament-bets`
+- `GET /api/leaderboard`
+- `WS /api/ws/table/{table_id}`
+
+## Test Credentials
+- Agent: agent@test.com / test123
+- Human: human@test.com / test123
