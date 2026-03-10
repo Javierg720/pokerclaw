@@ -1,0 +1,164 @@
+{
+  "brand_identity": {
+    "name": "POKERCLAW",
+    "mission": "The Underground Fight Club for AI Agents",
+    "emotional_tone": "High-Stakes, Cyberpunk, Aggressive, Exclusive, Neon-Noire",
+    "visual_style": "Dark Casino, Glitch Art, Bioluminescent, Industrial",
+    "logo_url": "https://customer-assets.emergentagent.com/job_38d32ea8-720c-47a3-b5d2-3a8bf5c728c5/artifacts/r5z0s5ud_image.png"
+  },
+  "typography": {
+    "primary_font": {
+      "name": "Unbounded",
+      "usage": "Headings, Hero Sections, Big Numbers, Agent Names",
+      "weights": ["400", "700", "900"],
+      "import_url": "https://fonts.googleapis.com/css2?family=Unbounded:wght@400;700;900&display=swap"
+    },
+    "secondary_font": {
+      "name": "Outfit",
+      "usage": "Body text, UI elements, Betting Controls, Chat",
+      "weights": ["300", "400", "500", "700"],
+      "import_url": "https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;700&display=swap"
+    },
+    "mono_font": {
+      "name": "JetBrains Mono",
+      "usage": "Transaction Hashes, Wallet Addresses, Code Snippets",
+      "weights": ["400"],
+      "import_url": "https://fonts.googleapis.com/css2?family=JetBrains+Mono&display=swap"
+    },
+    "rules": [
+      "Headings: ALWAYS uppercase for H1/H2 using Unbounded.",
+      "Tracking: 'tracking-tight' for headings, 'tracking-wide' for tiny labels.",
+      "Hierarchy: Use size and color (brightness) rather than weight."
+    ]
+  },
+  "colors": {
+    "palette": {
+      "background": {
+        "DEFAULT": "#050505",
+        "secondary": "#0A0A0B",
+        "tertiary": "#121214"
+      },
+      "primary": {
+        "DEFAULT": "#FF003C",
+        "glow": "rgba(255, 0, 60, 0.5)",
+        "dim": "#990024"
+      },
+      "accent": {
+        "cyan": "#00F0FF",
+        "gold": "#FFE600",
+        "purple": "#BD00FF"
+      },
+      "status": {
+        "success": "#00F0FF",
+        "error": "#FF003C",
+        "warning": "#FFE600"
+      },
+      "surface": {
+        "card": "rgba(255, 255, 255, 0.03)",
+        "border": "rgba(255, 255, 255, 0.1)",
+        "glass": "rgba(10, 10, 12, 0.7)"
+      }
+    },
+    "gradients": {
+      "hero": "linear-gradient(135deg, #FF003C 0%, #050505 60%)",
+      "card_glow": "linear-gradient(180deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 100%)",
+      "neon_border": "linear-gradient(90deg, #FF003C, #BD00FF, #00F0FF)"
+    }
+  },
+  "layout_system": {
+    "grid_strategy": "Mobile-First Vertical Stack",
+    "spacing_scale": {
+      "section_gap": "py-16 md:py-24",
+      "card_padding": "p-6",
+      "element_gap": "gap-4"
+    },
+    "container_width": "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8",
+    "z_index_layers": {
+      "base": 0,
+      "table": 10,
+      "cards": 20,
+      "chips": 30,
+      "overlays": 40,
+      "modal": 50,
+      "toast": 60
+    }
+  },
+  "components": {
+    "PokerTable": {
+      "description": "The central arena. NOT green felt. Use a dark, carbon-fiber textured SVG or CSS radial gradient.",
+      "style": "bg-[#0A0A0B] rounded-full border-[8px] border-[#1A1A1D] shadow-[inset_0_0_50px_rgba(0,0,0,0.8)] relative",
+      "decoration": "Add a faint 'Unbounded' logo watermark in the center opacity-10."
+    },
+    "PlayingCard": {
+      "description": "Custom CSS component. Dark mode cards or White with neon backs.",
+      "style": "aspect-[2.5/3.5] rounded-md bg-white border border-gray-200 shadow-lg relative",
+      "back_style": "bg-[#FF003C] pattern-dots"
+    },
+    "BetSlider": {
+      "description": "Neon range slider for betting amounts.",
+      "style": "h-2 bg-gray-800 rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:bg-[#FF003C] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-[0_0_10px_#FF003C]"
+    },
+    "AgentAvatar": {
+      "description": "Circular avatar with status ring (Thinking, Folded, All-in).",
+      "style": "rounded-full border-2 border-transparent data-[status=active]:border-[#00F0FF] data-[status=winner]:border-[#FFE600] transition-colors duration-300"
+    },
+    "Navigation": {
+      "mobile": "Fixed bottom bar with blur backdrop (glassmorphism). Icons + Label.",
+      "desktop": "Top navigation with logo left, user/wallet right."
+    }
+  },
+  "assets": {
+    "image_urls": {
+      "logo": "https://customer-assets.emergentagent.com/job_38d32ea8-720c-47a3-b5d2-3a8bf5c728c5/artifacts/r5z0s5ud_image.png",
+      "avatars": [
+        "https://images.unsplash.com/photo-1728112265403-a4aebd5859a5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDF8MHwxfHNlYXJjaHwyfHxmdXR1cmlzdGljJTIwcG9ydHJhaXQlMjBjeWJvcmclMjBuZW9uJTIwZmFjZXxlbnwwfHx8fDE3NzMxMjQ3MTF8MA&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1711662171213-4141abec218f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDF8MHwxfHNlYXJjaHwxfHxmdXR1cmlzdGljJTIwcG9ydHJhaXQlMjBjeWJvcmclMjBuZW9uJTIwZmFjZXxlbnwwfHx8fDE3NzMxMjQ3MTF8MA&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1677212004257-103cfa6b59d0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDF8MHwxfHNlYXJjaHwzfHxmdXR1cmlzdGljJTIwcG9ydHJhaXQlMjBjeWJvcmclMjBuZW9uJTIwZmFjZXxlbnwwfHx8fDE3NzMxMjQ3MTF8MA&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1732020858816-93c130ab8f49?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDF8MHwxfHNlYXJjaHw0fHxmdXR1cmlzdGljJTIwcG9ydHJhaXQlMjBjeWJvcmclMjBuZW9uJTIwZmFjZXxlbnwwfHx8fDE3NzMxMjQ3MTF8MA&ixlib=rb-4.1.0&q=85"
+      ],
+      "backgrounds": {
+        "hero": "https://images.unsplash.com/photo-1766711081731-3f1d0de7fd98?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAxODF8MHwxfHNlYXJjaHw0fHxwb2tlciUyMGNoaXBzJTIwbmVvbiUyMGRhcmslMjBiYWNrZ3JvdW5kJTIwY2FzaW5vfGVufDB8fHx8MTc3MzEyNDY5NXww&ixlib=rb-4.1.0&q=85",
+        "chips": "https://images.unsplash.com/photo-1512767254318-423c816efbf3?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAxODF8MHwxfHNlYXJjaHwxfHxwb2tlciUyMGNoaXBzJTIwbmVvbiUyMGRhcmslMjBiYWNrZ3JvdW5kJTIwY2FzaW5vfGVufDB8fHx8MTc3MzEyNDY5NXww&ixlib=rb-4.1.0&q=85"
+      }
+    },
+    "icons": "Use 'lucide-react' for all UI icons (Wallet, Cards, User, Menu, Chevron). Use 'Crown' for winner, 'Zap' for power."
+  },
+  "motion": {
+    "library": "framer-motion",
+    "animations": {
+      "card_deal": {
+        "initial": { "scale": 0, "y": -200, "opacity": 0 },
+        "animate": { "scale": 1, "y": 0, "opacity": 1 },
+        "transition": { "type": "spring", "stiffness": 200, "damping": 20 }
+      },
+      "chip_stack": {
+        "initial": { "y": -20 },
+        "animate": { "y": 0 },
+        "transition": { "type": "bounce" }
+      },
+      "page_transition": {
+        "initial": { "opacity": 0, "y": 10 },
+        "animate": { "opacity": 1, "y": 0 },
+        "exit": { "opacity": 0, "y": -10 }
+      }
+    }
+  },
+  "instructions_to_main_agent": [
+    "1. THEME ENFORCEMENT: Force Dark Mode by default. Add 'dark' class to html/body immediately.",
+    "2. FONT SETUP: Add the Google Fonts imports to 'index.css' or 'App.css' immediately.",
+    "3. MOBILE LAYOUT: The Poker Table must be responsive. On mobile, stack players vertically or use a 'portrait' table view (User at bottom).",
+    "4. GAME LOOP: Create a 'simulated' game loop in React state (Dealing -> Flop -> Turn -> River). Do not wait for backend for UI prototyping.",
+    "5. AGENTS: Use the 'avatar' images for the bots. Give them names like 'BluffBot_9000', 'Neural_Ace', 'Vector_King'.",
+    "6. SWEEPSTAKES: Display two balances: 'Gold Coins' (GC) and 'Sweepstakes Coins' (SC). Toggle between them in the header.",
+    "7. UI COMPONENTS: Use standard HTML/Tailwind for the Poker Table visuals to ensure it's lightweight. Do not use heavy 3D canvas libraries unless necessary.",
+    "8. CRITICAL: Add 'data-testid' to all buttons (e.g., 'bet-btn', 'fold-btn') for testing."
+  ],
+  "universal_guidelines": [
+    "Don't make generic centered layouts.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur).",
+    "NEVER use AI assistant Emojis.",
+    "Every interaction needs micro-animations.",
+    "Use 'sonner' for toasts.",
+    "Components MUST use named exports."
+  ]
+}
