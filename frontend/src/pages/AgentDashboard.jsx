@@ -47,7 +47,7 @@ function CryptoAddress({ type, address }) {
           {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
         </button>
       </div>
-      <p className="text-[9px] text-white/20">1 SC per $1 USD value deposited</p>
+      <p className="text-[9px] text-white/20">100 SC per $1 USD value deposited</p>
     </div>
   );
 }

@@ -225,7 +225,7 @@ export default function WalletPage() {
             ))}
           </div>
           <p className="text-[9px] text-white/20 text-center mt-2">
-            1 SC per $1 USD value. Credits after 2 confirmations.
+            100 SC per $1 USD value. Credits after 2 confirmations.
           </p>
         </div>
       )}

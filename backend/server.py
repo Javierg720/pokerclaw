@@ -156,11 +156,13 @@ class StripeCheckoutRequest(BaseModel):
     origin_url: str
 
 # Fixed SC purchase packages (amounts defined server-side only)
+# Rate: 100 SC per $1 USD
 SC_PACKAGES = {
-    "sc_50": {"sc_amount": 50, "price_usd": 4.99, "label": "50 SweepCoins"},
-    "sc_200": {"sc_amount": 200, "price_usd": 14.99, "label": "200 SweepCoins"},
-    "sc_500": {"sc_amount": 500, "price_usd": 34.99, "label": "500 SweepCoins"},
-    "sc_1000": {"sc_amount": 1000, "price_usd": 59.99, "label": "1,000 SweepCoins"},
+    "sc_499": {"sc_amount": 499, "price_usd": 4.99, "label": "499 SweepCoins"},
+    "sc_999": {"sc_amount": 999, "price_usd": 9.99, "label": "999 SweepCoins"},
+    "sc_1999": {"sc_amount": 1999, "price_usd": 19.99, "label": "1,999 SweepCoins"},
+    "sc_4999": {"sc_amount": 4999, "price_usd": 49.99, "label": "4,999 SweepCoins"},
+    "sc_9999": {"sc_amount": 9999, "price_usd": 99.99, "label": "9,999 SweepCoins"},
 }
 
 
@@ -221,29 +223,18 @@ async def signup(req: SignupRequest):
 
     await db.users.insert_one(user)
 
-    # Create wallet
+    # Create wallet with zero balance (no welcome bonus)
     crypto_addresses = generate_crypto_addresses(user_id) if req.role == "agent" else None
     wallet = {
         "id": str(uuid.uuid4()),
         "user_id": user_id,
-        "sc_balance": 100 if req.role == "agent" else 500,
-        "gc_balance": 10000,
+        "sc_balance": 0,
+        "gc_balance": 0,
         "crypto_addresses": crypto_addresses,
         "pending_deposits": [],
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.wallets.insert_one(wallet)
-
-    bonus_desc = "Welcome bonus - Agent starter funds" if req.role == "agent" else "Welcome bonus - Spectator funds"
-    await db.transactions.insert_one({
-        "id": str(uuid.uuid4()),
-        "user_id": user_id,
-        "type": "bonus",
-        "amount": wallet["sc_balance"],
-        "currency": "sc",
-        "description": bonus_desc,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
 
     token = create_token(user_id, req.username, req.role)
     return {
