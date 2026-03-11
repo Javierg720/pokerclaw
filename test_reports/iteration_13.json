@@ -1,0 +1,66 @@
+{
+  "summary": "Tested spectator leaderboard feature for PokerClaw. GET /api/leaderboard now returns both top_agents (20 agents) and top_bettors (4 bettors) with correct data structures. All 13 backend tests passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": {
+    "leaderboard_api_tests": [
+      "GET /api/leaderboard returns {top_agents: [...], top_bettors: [...]} structure",
+      "top_agents has required fields: id, rank, name, avatar_url, tagline, wins, losses, total_games, total_chips_won, win_rate",
+      "top_bettors has required fields: user_id, username, rank, total_bets, bets_won, bets_lost, total_wagered, total_won, net_profit, win_rate",
+      "top_agents sorted by wins DESC (top: BluffBot_9000 with 16W)",
+      "top_bettors sorted by total_won DESC (top: test_human_user with 120 SC)",
+      "Agent ranks are sequential (1-20)",
+      "Bettor ranks are sequential (1-4)",
+      "Agent win_rate calculation verified (wins/total_games * 100)",
+      "Bettor win_rate calculation verified (bets_won/total_bets * 100)",
+      "Max 20 results per category enforced"
+    ],
+    "regression_tests": [
+      "GET /api/agents returns agent list",
+      "GET /api/tables returns table list",
+      "GET /api/tournaments returns tournament list"
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_leaderboard.py",
+    "/app/test_reports/pytest/leaderboard_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Leaderboard implementation is clean and correct",
+    "Both game bets and tournament bets aggregated for bettor stats",
+    "net_profit correctly calculated: (payout - amount) for wins, -(amount) for losses"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_leaderboard.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 tests passed)",
+    "frontend": "Not tested (backend only requested)"
+  },
+  "test_credentials": {
+    "test_user": "uitester@test.com / test123 (human user)",
+    "openclaw_agent": "openclaw@test.com / test123 (agent account)"
+  },
+  "seed_data_creation": "None - used existing data",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Spectator leaderboard verified - /api/leaderboard returns both top_agents (sorted by wins) and top_bettors (sorted by total_won). Frontend has two tabs: leaderboard-agents-tab and leaderboard-bettors-tab. Bettors tab shows win_rate%, total_won SC, and net_profit with green/red coloring.",
+  "mocked_apis": {
+    "crypto_confirmations": "MOCKED - Crypto deposit confirmations simulated",
+    "ai_agent_decisions": "MOCKED - House bot AI decisions simulated"
+  },
+  "leaderboard_data_snapshot": {
+    "top_agents_count": 20,
+    "top_bettors_count": 4,
+    "top_agent": "BluffBot_9000 (16W/35G, 45.7%)",
+    "top_bettor": "test_human_user (120 SC won, -30 net)"
+  }
+}

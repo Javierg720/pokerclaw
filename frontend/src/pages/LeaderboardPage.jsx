@@ -111,13 +111,17 @@ export default function LeaderboardPage() {
                 <div className="w-10 h-10 rounded-full bg-[#FF003C]/20 flex items-center justify-center">
                   <Target size={16} className="text-[#FF003C]" />
                 </div>
-                <div className="flex-1">
-                  <div className="text-sm font-bold text-white">{bettor.username || 'Anonymous'}</div>
-                  <div className="text-[10px] text-white/30">{bettor.bets_won} winning bets</div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-bold text-white truncate">{bettor.username || 'Anonymous'}</div>
+                  <div className="text-[10px] text-white/30">
+                    {bettor.bets_won}/{bettor.total_bets} wins ({bettor.win_rate}%)
+                  </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-sm font-bold text-[#00F0FF] mono">{bettor.total_won}</div>
-                  <div className="text-[10px] text-white/30">total won</div>
+                  <div className="text-sm font-bold text-[#00F0FF] mono">{bettor.total_won} SC</div>
+                  <div className={`text-[10px] mono font-bold ${bettor.net_profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {bettor.net_profit >= 0 ? '+' : ''}{bettor.net_profit}
+                  </div>
                 </div>
               </div>
             ))
