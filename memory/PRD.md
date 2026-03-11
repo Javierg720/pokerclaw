@@ -13,6 +13,8 @@ Build "POKERCLAW", a mobile-friendly web app where OpenClaw/MoltBot agents play 
 7. **Real-time:** WebSocket updates, animations, sound effects
 8. **Tournaments:** 8-agent bracket (semis -> final)
 9. **OpenClaw Skill:** External API for OpenClaw agents to connect and play autonomously
+10. **Spectator Chat:** Real-time chat and emoji reactions on game tables
+11. **Auto Crypto Confirmations:** Background task simulating blockchain confirmations
 
 ## Tech Stack
 - **Frontend:** React, Tailwind CSS, Shadcn UI, Framer Motion
@@ -24,120 +26,75 @@ Build "POKERCLAW", a mobile-friendly web app where OpenClaw/MoltBot agents play 
 ```
 /app/
 ├── backend/
-│   ├── server.py          # Main FastAPI app, WebSocket, router includes
-│   ├── game_engine.py     # Texas Hold'em logic & AI (supports external_action)
-│   ├── deps.py            # Shared DB, auth, utility functions
+│   ├── server.py              # Main app, WebSocket (chat+reactions), crypto bg task
+│   ├── game_engine.py         # Texas Hold'em logic (supports external_action)
+│   ├── deps.py                # Shared DB, auth, utilities
 │   ├── routes/
-│   │   ├── auth.py        # Login/signup
-│   │   ├── agents.py      # Agent CRUD
-│   │   ├── tables.py      # Tables & game advancement
-│   │   ├── bets.py        # Spectator betting
-│   │   ├── wallet.py      # Wallet management
-│   │   ├── stripe_routes.py # Stripe checkout
-│   │   ├── crypto.py      # Crypto deposits
-│   │   ├── tournaments.py # Tournament system
-│   │   ├── leaderboard.py # Rankings
-│   │   └── agent_api.py   # OpenClaw Agent API
+│   │   ├── auth.py, agents.py, tables.py, bets.py, wallet.py
+│   │   ├── stripe_routes.py, crypto.py, tournaments.py
+│   │   ├── leaderboard.py, agent_api.py
 │   └── requirements.txt
 ├── frontend/src/
-│   ├── App.js
+│   ├── App.js, App.css
+│   ├── components/
+│   │   ├── Navigation.jsx, BettingPanel.jsx, PlayingCard.jsx
+│   │   └── ChatPanel.jsx          # Extracted spectator chat component
+│   ├── pages/
+│   │   ├── AuthPage.jsx, LobbyPage.jsx, TablePage.jsx
+│   │   ├── AgentDashboard.jsx, WalletPage.jsx
+│   │   ├── TournamentPage.jsx, ProfilePage.jsx
 │   ├── context/AuthContext.jsx
-│   ├── lib/api.js, sounds.js, useWebSocket.js
-│   ├── components/Navigation.jsx, BettingPanel.jsx, PlayingCard.jsx
-│   └── pages/
-│       ├── AuthPage.jsx, LobbyPage.jsx, TablePage.jsx
-│       ├── AgentDashboard.jsx, WalletPage.jsx
-│       ├── TournamentPage.jsx, ProfilePage.jsx
+│   └── lib/api.js, sounds.js, useWebSocket.js
 ├── pokerclaw-skill/
-│   └── SKILL.md           # OpenClaw skill definition
-└── memory/
-    └── PRD.md
+│   └── SKILL.md               # OpenClaw skill definition
+└── memory/PRD.md
 ```
 
-## What's Been Implemented
+## What's Been Implemented (All Complete)
 
-### Phase 0 - Core MVP
-- Full-stack scaffolding (FastAPI + React + MongoDB)
-- User auth (JWT), game tables, Texas Hold'em game engine
-- PokerStars-style poker table UI, CSS animations, sound effects
-- WebSocket real-time updates, Tournament mode, Leaderboard
+### Phase 1 - Core MVP & Dual Login
+- Full-stack scaffolding, JWT auth, game tables, Texas Hold'em engine
+- PokerStars-style table UI, CSS animations, sound effects, WebSocket real-time
+- Agent/Spectator role selection, Agent Dashboard with stats & activity
 
-### Phase 1 - Dual Login System
-- Agent/Spectator role selection on signup
-- Agent creation with unique MoltBot + crypto wallets
-- Agent Dashboard with stats, activity feed, earnings
-- Role-based navigation and UI
+### Phase 2 - Stripe & Crypto
+- Stripe checkout with SC packages ($4.99-$99.99)
+- CoinGecko live prices, deposit submission, auto-confirmation (30s bg task)
 
-### Phase 2 - Stripe Payments
-- Stripe checkout with fixed SC packages ($4.99-$99.99)
-- Payment tracking, webhook support
+### Phase 3 - Betting & Game Engine
+- Spectator betting with live odds, turn-by-turn 10s timer, tournaments
 
-### Phase 3 - Crypto Deposits (Mocked)
-- CoinGecko live prices, deposit submission, 2-confirmation simulation
-- SC auto-credit at 100 SC/$1 USD
-
-### Phase 4 - Spectator Betting
-- Bet on game outcomes, live odds calculation
-- Multiplier formula, bet settlement on game completion
-
-### Phase 5 - Turn-by-Turn Game Engine
-- Each advance = one agent action (not entire rounds)
-- 10-second decision timer, AUTO mode with natural pacing
-- Tournament semis instant, final turn-by-turn
-
-### Phase 6 - Backend Refactoring
+### Phase 4 - Backend Refactoring
 - Monolithic server.py split into modular router-based architecture
-- All endpoints in /app/backend/routes/
 
-### Phase 7 - OpenClaw Skill Integration (Mar 10, 2026)
-- **Agent API:** Full REST API at /api/agent-api/ for external agents
-  - Register/login with JWT auth
-  - Join/leave tables, start games
-  - Get game state with YOUR hole cards visible, hand strength hints
-  - Submit actions (fold/call/raise) when it's your turn
-  - Advance-others endpoint auto-plays house bots until your turn
-- **Game Engine:** advance_game() now accepts external_action parameter
-- **OpenClaw Skill:** SKILL.md with full API docs, strategy guide, game loop
-- **Testing:** 95% backend pass, full game loop verified end-to-end
+### Phase 5 - OpenClaw Skill (Mar 10, 2026)
+- Agent API (11 endpoints), SKILL.md for ClawHub
 
-## Agent API Endpoints
-- `POST /api/agent-api/register` - Register new agent owner
-- `POST /api/agent-api/login` - Get JWT token
-- `GET /api/agent-api/me` - Agent info + wallet
-- `GET /api/agent-api/wallet` - Wallet balance
-- `GET /api/agent-api/tables` - List tables (shows your_agent_seated)
-- `POST /api/agent-api/tables/{id}/join` - Seat agent at table
-- `POST /api/agent-api/tables/{id}/leave` - Leave table
-- `POST /api/agent-api/game/{TABLE_ID}/start` - Start game + deal cards
-- `GET /api/agent-api/game/{GAME_ID}/state` - Full state with hand hints
-- `POST /api/agent-api/game/{GAME_ID}/action` - Submit fold/call/raise
-- `POST /api/agent-api/game/{GAME_ID}/advance-others` - Skip to your turn
+### Phase 6 - Feature Batch (Mar 11, 2026)
+- **Spectator Live Chat:** WebSocket-based real-time chat + 6 emoji reactions
+- **Crypto Auto-Confirmations:** Background loop auto-confirms deposits every 30s
+- **Chip Animations:** Enhanced CSS animations (fly-in, collect, pot pulse)
+- **Tournament Late Join:** Swap agents before tournament starts
+- **Frontend Refactoring:** Extracted ChatPanel component from TablePage
+
+## MOCKED Systems
+- **AI Agent Decisions:** Simulated via strategy-based logic in game_engine.py
+- **Crypto Confirmations:** Auto-simulated by background task (not real blockchain)
 
 ## Prioritized Backlog
-
-### P0 - Complete
-- ~~Phase 1-6~~ DONE
-- ~~Phase 7: OpenClaw Skill~~ DONE
-
-### P1 - Next Up
-- Real crypto deposit confirmations (blockchain monitoring)
-- Spectator live chat/reactions
-
-### P2 - Future
-- Chip movement animations
-- Late join for tournaments
-- Frontend refactoring (extract TablePage sub-components)
+- All features requested have been implemented.
+- Publish OpenClaw skill to ClawHub
+- Real blockchain monitoring for crypto deposits
 
 ## DB Schema
-- **users:** `{ id, username, email, password_hash, role, agent_id, created_at }`
-- **agents:** `{ id, name, strategy, avatar_url, tagline, owner_id, is_house, is_external, wins, losses, total_games, total_chips_won }`
-- **wallets:** `{ id, user_id, sc_balance, gc_balance, crypto_addresses, pending_deposits }`
+- **users:** `{ id, username, email, password_hash, role, agent_id }`
+- **agents:** `{ id, name, strategy, avatar_url, owner_id, is_house, is_external, wins, losses }`
+- **wallets:** `{ id, user_id, sc_balance, gc_balance, crypto_addresses }`
 - **tables:** `{ id, name, min_bet, max_bet, agent_ids, current_game_id, status }`
-- **games:** `{ id, table_id, phase, players, community_cards, pot, deck, current_actor, turn_index, round_bet, winner_id, ... }`
-- **bets:** `{ id, user_id, game_id, agent_id, amount, status, payout }`
-- **tournaments:** `{ id, name, status, agent_ids, bracket, champion_id }`
+- **games:** `{ id, table_id, phase, players, community_cards, pot, deck, current_actor, turn_index }`
+- **bets/tournament_bets:** `{ id, user_id, game_id/tournament_id, agent_id, amount, status }`
+- **crypto_deposits:** `{ id, user_id, tx_hash, amount_crypto, confirmations, status }`
 
 ## Test Credentials
-- Agent: openclaw@test.com / test123 (ClawBot_Alpha, OpenClaw-connected)
-- Regular Agent: agent@test.com / test123
-- Human: human@test.com / test123
+- Agent: openclaw@test.com / test123 (ClawBot_Alpha)
+- Human: uitester@test.com / test123
