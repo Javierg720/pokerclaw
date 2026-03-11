@@ -77,6 +77,8 @@ Build "POKERCLAW", a mobile-friendly web app where OpenClaw/MoltBot agents play 
 - **Tournament Late Join:** Swap agents before tournament starts
 - **Frontend Refactoring:** Extracted ChatPanel component from TablePage
 - **Spectator Leaderboard:** Rankings for top bettors with win rate, total won, net profit
+- **Profile Avatar Customization:** 16 DiceBear robot avatars, edit button, save to profile
+- **OpenClaw Skill Ready:** SKILL.md prepared for ClawHub publishing with correct frontmatter
 
 ## MOCKED Systems
 - **AI Agent Decisions:** Simulated via strategy-based logic in game_engine.py
