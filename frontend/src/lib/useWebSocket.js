@@ -5,7 +5,10 @@ export function useTableSocket(tableId) {
   const [gameState, setGameState] = useState(null);
   const [spectators, setSpectators] = useState(0);
   const [connected, setConnected] = useState(false);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [reactions, setReactions] = useState([]);
   const reconnectTimer = useRef(null);
+  const reactionIdRef = useRef(0);
 
   const connect = useCallback(() => {
     if (!tableId) return;
@@ -28,11 +31,24 @@ export function useTableSocket(tableId) {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === 'game_state') {
+          if (data.type === 'game_state' || data.type === 'game_update') {
             setGameState(data.game);
           }
-          if (data.type === 'spectators') {
+          if (data.type === 'spectators' || data.type === 'spectator_count') {
             setSpectators(data.count);
+          }
+          if (data.type === 'chat') {
+            setChatMessages(prev => [...prev.slice(-49), data]);
+          }
+          if (data.type === 'chat_history') {
+            setChatMessages(data.messages || []);
+          }
+          if (data.type === 'reaction') {
+            const id = ++reactionIdRef.current;
+            setReactions(prev => [...prev, { ...data, id }]);
+            setTimeout(() => {
+              setReactions(prev => prev.filter(r => r.id !== id));
+            }, 2000);
           }
         } catch { /* ignore parse errors */ }
       };
@@ -43,7 +59,6 @@ export function useTableSocket(tableId) {
 
       ws.onclose = () => {
         setConnected(false);
-        // Auto-reconnect after 3 seconds
         reconnectTimer.current = setTimeout(() => {
           connect();
         }, 3000);
@@ -60,7 +75,7 @@ export function useTableSocket(tableId) {
     return () => {
       clearTimeout(reconnectTimer.current);
       if (wsRef.current) {
-        wsRef.current.onclose = null; // prevent reconnect on unmount
+        wsRef.current.onclose = null;
         wsRef.current.close();
       }
     };
@@ -72,5 +87,5 @@ export function useTableSocket(tableId) {
     }
   }, []);
 
-  return { gameState, spectators, connected, send };
+  return { gameState, spectators, connected, send, chatMessages, reactions };
 }

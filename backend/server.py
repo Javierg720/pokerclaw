@@ -32,6 +32,7 @@ app = FastAPI()
 class TableManager:
     def __init__(self):
         self.connections: dict[str, list[WebSocket]] = {}
+        self.chat_history: dict[str, list[dict]] = {}
 
     async def connect(self, table_id: str, ws: WebSocket):
         await ws.accept()
@@ -60,6 +61,16 @@ class TableManager:
     def spectator_count(self, table_id: str) -> int:
         return len(self.connections.get(table_id, []))
 
+    def add_chat(self, table_id: str, msg: dict):
+        if table_id not in self.chat_history:
+            self.chat_history[table_id] = []
+        self.chat_history[table_id].append(msg)
+        # Keep last 50 messages
+        self.chat_history[table_id] = self.chat_history[table_id][-50:]
+
+    def get_chat(self, table_id: str) -> list:
+        return self.chat_history.get(table_id, [])
+
 
 table_manager = TableManager()
 
@@ -72,12 +83,36 @@ async def websocket_table(websocket: WebSocket, table_id: str):
     try:
         count = table_manager.spectator_count(table_id)
         await table_manager.broadcast(table_id, {"type": "spectator_count", "count": count})
+        # Send chat history on connect
+        history = table_manager.get_chat(table_id)
+        if history:
+            await websocket.send_json({"type": "chat_history", "messages": history})
         while True:
             data = await websocket.receive_text()
             try:
                 msg = json.loads(data)
                 if msg.get("type") == "ping":
                     await websocket.send_json({"type": "pong"})
+                elif msg.get("type") == "chat":
+                    username = msg.get("username", "Spectator")
+                    text = msg.get("text", "")[:200]  # Limit length
+                    if text.strip():
+                        chat_msg = {
+                            "type": "chat",
+                            "username": username,
+                            "text": text,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+                        table_manager.add_chat(table_id, chat_msg)
+                        await table_manager.broadcast(table_id, chat_msg)
+                elif msg.get("type") == "reaction":
+                    emoji = msg.get("emoji", "")
+                    if emoji in ("fire", "skull", "clap", "eyes", "money", "crown"):
+                        await table_manager.broadcast(table_id, {
+                            "type": "reaction",
+                            "emoji": emoji,
+                            "username": msg.get("username", ""),
+                        })
             except json.JSONDecodeError:
                 pass
     except WebSocketDisconnect:
@@ -126,10 +161,45 @@ async def stripe_webhook(request: Request):
     return {"status": "ok"}
 
 
+# ─── Background task: auto-confirm crypto deposits ───
+
+async def crypto_auto_confirm_loop():
+    """Simulates blockchain confirmations for pending crypto deposits.
+    Every 30 seconds, increment confirmations by 1 for all pending deposits.
+    After 2 confirmations, credit the wallet automatically."""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            pending = await db.crypto_deposits.find({"status": "pending"}, {"_id": 0}).to_list(100)
+            for dep in pending:
+                new_conf = dep.get("confirmations", 0) + 1
+                update = {"confirmations": new_conf}
+                if new_conf >= dep.get("required_confirmations", 2):
+                    update["status"] = "confirmed"
+                    update["confirmed_at"] = datetime.now(timezone.utc).isoformat()
+                    await db.wallets.update_one(
+                        {"user_id": dep["user_id"]},
+                        {"$inc": {"sc_balance": dep["sc_amount"]}}
+                    )
+                    await db.transactions.insert_one({
+                        "id": str(uuid.uuid4()), "user_id": dep["user_id"],
+                        "type": "crypto_deposit", "amount": dep["sc_amount"], "currency": "sc",
+                        "description": f"Auto-confirmed: {dep['amount_crypto']} {dep['crypto_type'].upper()} = {dep['sc_amount']} SC",
+                        "created_at": datetime.now(timezone.utc).isoformat()
+                    })
+                    logger.info(f"Auto-confirmed crypto deposit {dep['id']}: {dep['sc_amount']} SC")
+                await db.crypto_deposits.update_one({"id": dep["id"]}, {"$set": update})
+        except Exception as e:
+            logger.error(f"Crypto confirm loop error: {e}")
+
+
 # ─── Startup - Seed Data ───
 
 @app.on_event("startup")
 async def seed_data():
+    # Start background crypto confirmation task
+    asyncio.create_task(crypto_auto_confirm_loop())
+
     agent_count = await db.agents.count_documents({"is_house": True})
     if agent_count == 0:
         old_count = await db.agents.count_documents({})

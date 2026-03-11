@@ -106,6 +106,74 @@
   font-family: 'JetBrains Mono', monospace;
 }
 
+/* Chip fly-in animation */
+.chip-fly {
+  animation: chip-fly-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  opacity: 0;
+}
+@keyframes chip-fly-in {
+  0% {
+    opacity: 0;
+    transform: translate(var(--chip-x, 0px), var(--chip-y, 0px)) scale(0.4);
+  }
+  60% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1.15);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+/* Chip collect to pot animation */
+.chip-collect {
+  animation: chip-collect-to-pot 0.8s ease-in forwards;
+}
+@keyframes chip-collect-to-pot {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+  70% {
+    opacity: 0.8;
+    transform: translate(calc(var(--chip-x, 0px) * -0.8), calc(var(--chip-y, 0px) * -0.8)) scale(0.6);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(var(--chip-x, 0px) * -1), calc(var(--chip-y, 0px) * -1)) scale(0);
+  }
+}
+
+/* Pot pulse on chip arrival */
+.pot-pulse {
+  animation: pot-glow 0.5s ease-out;
+}
+@keyframes pot-glow {
+  0% { text-shadow: 0 0 10px rgba(255, 230, 0, 0.3); }
+  50% { text-shadow: 0 0 25px rgba(255, 230, 0, 0.8), 0 0 50px rgba(255, 230, 0, 0.3); transform: scale(1.1); }
+  100% { text-shadow: 0 0 10px rgba(255, 230, 0, 0.3); transform: scale(1); }
+}
+
+/* Reaction float-up animation */
+.animate-float-up {
+  animation: float-up 2s ease-out forwards;
+}
+@keyframes float-up {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: translateY(-40px) scale(1.3);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-80px) scale(0.8);
+  }
+}
+
 /* Dealer button */
 .dealer-btn {
   background: #FFE600;

@@ -3,7 +3,7 @@ import { Navigation } from '../components/Navigation';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Slider } from '../components/ui/slider';
-import { Trophy, Swords, Crown, ChevronRight, Plus, Zap, Coins } from 'lucide-react';
+import { Trophy, Swords, Crown, ChevronRight, Plus, Zap, Coins, RefreshCw } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from 'sonner';
 import { sounds } from '../lib/sounds';
@@ -276,6 +276,58 @@ export default function TournamentPage() {
               </div>
             )}
           </div>
+
+          {/* Late Join - Swap agents before tournament starts */}
+          {selected.status === 'lobby' && (
+            <div className="glass rounded-2xl p-4 space-y-3" data-testid="tournament-late-join">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-white/60 uppercase tracking-widest flex items-center gap-1.5">
+                  <RefreshCw size={12} className="text-[#00F0FF]" />
+                  SWAP AGENTS
+                </h4>
+                <span className="text-[9px] text-white/20">Click a slot to replace</span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(selected.agent_ids || []).map((aid, idx) => {
+                  const agent = getAgentById(aid);
+                  return (
+                    <button
+                      key={`${aid}-${idx}`}
+                      onClick={async () => {
+                        // Get all agents and pick a random one not in tournament
+                        const available = agents.filter(a => !selected.agent_ids.includes(a.id));
+                        if (available.length === 0) {
+                          toast.error('No other agents available');
+                          return;
+                        }
+                        const replacement = available[Math.floor(Math.random() * available.length)];
+                        try {
+                          const res = await api.post(`/tournaments/${selected.id}/join`, {
+                            slot_index: idx,
+                            agent_id: replacement.id,
+                          });
+                          setSelected(res.data);
+                          toast.success(`Swapped in ${replacement.name}!`);
+                          fetchData();
+                        } catch (err) {
+                          toast.error(err.response?.data?.detail || 'Swap failed');
+                        }
+                      }}
+                      data-testid={`swap-slot-${idx}`}
+                      className="rounded-lg p-2 text-left transition-all border border-white/5 bg-white/[0.02] hover:border-[#00F0FF]/30 hover:bg-[#00F0FF]/5 flex items-center gap-2"
+                    >
+                      <img src={agent.avatar_url} alt="" className="w-5 h-5 rounded-full object-cover" />
+                      <div className="flex-1 min-w-0">
+                        <span className="text-[10px] font-semibold text-white truncate block">{agent.name}</span>
+                        <span className="text-[8px] text-white/20">Slot {idx + 1}</span>
+                      </div>
+                      <RefreshCw size={10} className="text-white/15 flex-shrink-0" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Advance Button */}
           {selected.status !== 'complete' && (

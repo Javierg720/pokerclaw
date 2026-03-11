@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { PlayingCard } from '../components/PlayingCard';
 import { BettingPanel } from '../components/BettingPanel';
+import { ChatPanel } from '../components/ChatPanel';
 import { Navigation } from '../components/Navigation';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -311,7 +312,7 @@ export default function TablePage() {
   const autoAdvanceRef = useRef(null);
 
   // WebSocket for real-time updates
-  const { gameState: wsGame, spectators, connected } = useTableSocket(tableId);
+  const { gameState: wsGame, spectators, connected, send, chatMessages, reactions } = useTableSocket(tableId);
 
   const fetchTable = useCallback(async () => {
     try {
@@ -463,6 +464,25 @@ export default function TablePage() {
   const toggleSound = () => {
     const on = sounds.toggle();
     setSoundOn(on);
+  };
+
+  const chatUsername = (() => {
+    try {
+      const token = localStorage.getItem('pokerclaw_token');
+      if (token) {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        return payload.username || 'Spectator';
+      }
+    } catch { /* ignore */ }
+    return 'Spectator';
+  })();
+
+  const handleSendChat = (text) => {
+    send({ type: 'chat', username: chatUsername, text });
+  };
+
+  const handleSendReaction = (emoji) => {
+    send({ type: 'reaction', emoji, username: chatUsername });
   };
 
   const displayPhase = game?.display_phase || game?.phase;
@@ -622,6 +642,14 @@ export default function TablePage() {
           </div>
         </div>
       )}
+
+      <ChatPanel
+        chatMessages={chatMessages}
+        reactions={reactions}
+        onSendChat={handleSendChat}
+        onSendReaction={handleSendReaction}
+        username={chatUsername}
+      />
 
       <Navigation />
     </div>

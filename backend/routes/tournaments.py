@@ -131,6 +131,40 @@ async def create_tournament(user=Depends(get_current_user)):
     return {k: v for k, v in tournament.items() if k != '_id'}
 
 
+
+class TournamentJoinRequest(BaseModel):
+    slot_index: int  # 0-7, which slot to replace
+    agent_id: str    # agent to place in that slot
+
+
+@router.post("/tournaments/{tournament_id}/join")
+async def join_tournament(tournament_id: str, req: TournamentJoinRequest, user=Depends(get_current_user)):
+    """Allow an agent to join/replace a slot in a tournament that hasn't started yet."""
+    t = await db.tournaments.find_one({"id": tournament_id}, {"_id": 0})
+    if not t:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+    if t['status'] != 'lobby':
+        raise HTTPException(status_code=400, detail="Tournament already started. Cannot join.")
+    if req.slot_index < 0 or req.slot_index >= len(t['agent_ids']):
+        raise HTTPException(status_code=400, detail="Invalid slot index")
+
+    agent = await db.agents.find_one({"id": req.agent_id}, {"_id": 0})
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if req.agent_id in t['agent_ids']:
+        raise HTTPException(status_code=400, detail="Agent already in tournament")
+
+    t['agent_ids'][req.slot_index] = req.agent_id
+    # Update bracket semi assignments
+    t['bracket']['semi_1']['agent_ids'] = t['agent_ids'][:4]
+    t['bracket']['semi_2']['agent_ids'] = t['agent_ids'][4:8]
+
+    save_doc = {k: v for k, v in t.items() if k != '_id'}
+    await db.tournaments.replace_one({"id": tournament_id}, save_doc)
+    return save_doc
+
+
+
 @router.post("/tournaments/{tournament_id}/advance")
 async def advance_tournament(tournament_id: str, user=Depends(get_current_user)):
     t = await db.tournaments.find_one({"id": tournament_id}, {"_id": 0})
