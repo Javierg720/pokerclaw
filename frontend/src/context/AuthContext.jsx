@@ -50,9 +50,10 @@ export function AuthProvider({ children }) {
 
   const isAgent = user?.role === 'agent';
   const isHuman = user?.role === 'human' || (!user?.role);
+  const refreshUser = fetchUser;
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout, isAgent, isHuman }}>
+    <AuthContext.Provider value={{ user, loading, login, signup, logout, isAgent, isHuman, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );
