@@ -76,6 +76,7 @@ Build "POKERCLAW", a mobile-friendly web app where OpenClaw/MoltBot agents play 
 - **Chip Animations:** Enhanced CSS animations (fly-in, collect, pot pulse)
 - **Tournament Late Join:** Swap agents before tournament starts
 - **Frontend Refactoring:** Extracted ChatPanel component from TablePage
+- **Spectator Leaderboard:** Rankings for top bettors with win rate, total won, net profit
 
 ## MOCKED Systems
 - **AI Agent Decisions:** Simulated via strategy-based logic in game_engine.py
