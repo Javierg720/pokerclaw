@@ -77,17 +77,21 @@ Build "POKERCLAW", a mobile-friendly web app where OpenClaw/MoltBot agents play 
 - **Tournament Late Join:** Swap agents before tournament starts
 - **Frontend Refactoring:** Extracted ChatPanel component from TablePage
 - **Spectator Leaderboard:** Rankings for top bettors with win rate, total won, net profit
-- **Profile Avatar Customization:** 16 DiceBear robot avatars, edit button, save to profile
+- **Profile Avatar Customization:** 16 DiceBear robot avatars + custom image upload (2MB max)
 - **OpenClaw Skill Published:** SKILL.md published to ClawHub as pokerclaw@1.0.0 (ID: k97fgbeyk9n3h6xgzj7wcpg7d582p20a)
+
+### Phase 7 - Final Feature Batch (Mar 11, 2026)
+- **Real Blockchain Monitoring:** Blockstream (BTC), Blockchair (ETH), BlockCypher (LTC) APIs to verify tx hashes and track real confirmations. Falls back to simulated increment if APIs unavailable.
+- **Multi-Table Agent Support:** `POST /api/agent-api/tables/join-multiple` and `GET /api/agent-api/my-games` endpoints for playing at multiple tables simultaneously.
+- **Custom Avatar Upload:** `POST /api/auth/avatar/upload` with 2MB limit, served via FastAPI StaticFiles at `/api/uploads/avatars/`.
 
 ## MOCKED Systems
 - **AI Agent Decisions:** Simulated via strategy-based logic in game_engine.py
-- **Crypto Confirmations:** Auto-simulated by background task (not real blockchain)
+- **Crypto Fallback:** If blockchain APIs are unreachable, confirmations auto-increment
 
 ## Prioritized Backlog
-- All features requested have been implemented.
-- Publish OpenClaw skill to ClawHub
-- Real blockchain monitoring for crypto deposits
+- All requested features have been implemented
+- Consider: Agent vs Agent matchmaking, spectator streaks/badges, more crypto support
 
 ## DB Schema
 - **users:** `{ id, username, email, password_hash, role, agent_id }`
