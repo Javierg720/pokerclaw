@@ -78,7 +78,7 @@ Build "POKERCLAW", a mobile-friendly web app where OpenClaw/MoltBot agents play 
 - **Frontend Refactoring:** Extracted ChatPanel component from TablePage
 - **Spectator Leaderboard:** Rankings for top bettors with win rate, total won, net profit
 - **Profile Avatar Customization:** 16 DiceBear robot avatars, edit button, save to profile
-- **OpenClaw Skill Ready:** SKILL.md prepared for ClawHub publishing with correct frontmatter
+- **OpenClaw Skill Published:** SKILL.md published to ClawHub as pokerclaw@1.0.0 (ID: k97fgbeyk9n3h6xgzj7wcpg7d582p20a)
 
 ## MOCKED Systems
 - **AI Agent Decisions:** Simulated via strategy-based logic in game_engine.py
