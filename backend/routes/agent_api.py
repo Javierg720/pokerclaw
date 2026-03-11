@@ -502,3 +502,71 @@ async def get_wallet(user=Depends(get_current_user)):
         "sc_balance": wallet.get('sc_balance', 0),
         "gc_balance": wallet.get('gc_balance', 0),
     }
+
+
+
+class MultiTableJoinRequest(BaseModel):
+    table_ids: list[str]
+
+
+@router.post("/tables/join-multiple")
+async def join_multiple_tables(req: MultiTableJoinRequest, user=Depends(get_current_user)):
+    """Join your agent to multiple tables at once for multi-table play."""
+    agent = await _get_agent_for_user(user)
+    results = []
+    for tid in req.table_ids[:8]:  # Max 8 tables
+        table = await db.tables.find_one({"id": tid}, {"_id": 0})
+        if not table:
+            results.append({"table_id": tid, "status": "error", "message": "Table not found"})
+            continue
+        if agent['id'] in table.get('agent_ids', []):
+            results.append({"table_id": tid, "status": "already_seated", "message": f"Already at {table['name']}"})
+            continue
+        if len(table.get('agent_ids', [])) >= 8:
+            results.append({"table_id": tid, "status": "error", "message": "Table full"})
+            continue
+        if table.get('current_game_id'):
+            existing_game = await db.games.find_one({"id": table['current_game_id']}, {"_id": 0})
+            if existing_game and existing_game['phase'] not in ('complete',):
+                results.append({"table_id": tid, "status": "error", "message": "Game in progress"})
+                continue
+        await db.tables.update_one({"id": tid}, {"$push": {"agent_ids": agent['id']}})
+        results.append({"table_id": tid, "status": "joined", "message": f"Seated at {table['name']}"})
+    return {"results": results, "agent": agent['name']}
+
+
+@router.get("/my-games")
+async def get_my_active_games(user=Depends(get_current_user)):
+    """Get all active games your agent is participating in across all tables."""
+    agent = await _get_agent_for_user(user)
+    # Find tables where agent is seated
+    tables = await db.tables.find(
+        {"agent_ids": agent['id']}, {"_id": 0}
+    ).to_list(20)
+
+    active_games = []
+    for t in tables:
+        if not t.get('current_game_id'):
+            active_games.append({
+                "table_id": t['id'], "table_name": t['name'],
+                "game_id": None, "status": "waiting",
+                "is_your_turn": False,
+            })
+            continue
+        game = await db.games.find_one({"id": t['current_game_id']}, {"_id": 0})
+        if not game:
+            continue
+        is_your_turn = game.get('current_actor') == agent['id']
+        active_games.append({
+            "table_id": t['id'], "table_name": t['name'],
+            "game_id": game['id'],
+            "phase": game.get('display_phase', game.get('phase')),
+            "is_your_turn": is_your_turn,
+            "pot": game.get('pot', 0),
+            "status": "your_turn" if is_your_turn else ("complete" if game['phase'] == 'complete' else "waiting"),
+        })
+
+    # Sort: your_turn first, then active, then waiting
+    priority = {"your_turn": 0, "waiting": 1, "complete": 2}
+    active_games.sort(key=lambda g: priority.get(g['status'], 9))
+    return {"games": active_games, "agent": agent['name'], "total_tables": len(tables)}

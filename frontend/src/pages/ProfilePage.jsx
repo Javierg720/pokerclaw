@@ -4,7 +4,7 @@ import { Navigation } from '../components/Navigation';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { useNavigate } from 'react-router-dom';
-import { User, LogOut, Shield, Zap, Bot, Eye, Check, Palette } from 'lucide-react';
+import { User, LogOut, Shield, Zap, Bot, Eye, Check, Palette, Upload } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from 'sonner';
 
@@ -15,6 +15,7 @@ export default function ProfilePage() {
   const [selectedAvatar, setSelectedAvatar] = useState(null);
   const [saving, setSaving] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     api.get('/auth/avatars').then(res => setAvatars(res.data.avatars || [])).catch(() => {});
@@ -37,10 +38,43 @@ export default function ProfilePage() {
     }
   };
 
+  const handleUploadAvatar = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('File too large. Max 2MB');
+      return;
+    }
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post('/auth/avatar/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setSelectedAvatar(res.data.avatar_url);
+      if (refreshUser) await refreshUser();
+      toast.success('Avatar uploaded!');
+      setShowPicker(false);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleLogout = () => {
     logout();
     navigate('/');
   };
+
+  const resolveAvatarUrl = (url) => {
+    if (!url) return null;
+    if (url.startsWith('http')) return url;
+    return `${process.env.REACT_APP_BACKEND_URL}${url}`;
+  };
+
+  const displayAvatar = resolveAvatarUrl(currentAvatar);
 
   return (
     <div className="main-content" data-testid="profile-page">
@@ -55,9 +89,9 @@ export default function ProfilePage() {
         {/* User Card */}
         <div className="glass rounded-2xl p-6 text-center">
           <div className="relative inline-block">
-            {currentAvatar ? (
+            {displayAvatar ? (
               <img
-                src={currentAvatar}
+                src={displayAvatar}
                 alt="Avatar"
                 className="w-20 h-20 rounded-full object-cover mx-auto mb-2 border-2 border-white/10"
                 data-testid="profile-avatar"
@@ -135,6 +169,25 @@ export default function ProfilePage() {
                   )}
                 </button>
               ))}
+            </div>
+            {/* Custom upload */}
+            <div className="pt-2 border-t border-white/[0.06]">
+              <label
+                data-testid="avatar-upload-btn"
+                className={`flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-white/10 cursor-pointer hover:border-[#00F0FF]/30 hover:bg-[#00F0FF]/5 transition-all ${uploading ? 'opacity-50 pointer-events-none' : ''}`}
+              >
+                <Upload size={14} className="text-[#00F0FF]" />
+                <span className="text-[11px] font-semibold text-white/50">
+                  {uploading ? 'Uploading...' : 'Upload custom image (max 2MB)'}
+                </span>
+                <input
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.webp,.gif"
+                  onChange={handleUploadAvatar}
+                  className="hidden"
+                  data-testid="avatar-upload-input"
+                />
+              </label>
             </div>
           </div>
         )}

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from deps import db, client, logger
 from game_engine import AGENT_PRESETS, AVATAR_URLS
@@ -25,6 +26,11 @@ from routes.agent_api import router as agent_api_router
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 app = FastAPI()
+
+# ─── Serve uploaded avatars as static files ───
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads", "avatars")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+app.mount("/api/uploads/avatars", StaticFiles(directory=UPLOAD_DIR), name="avatar_uploads")
 
 
 # ─── WebSocket Manager ───
@@ -164,16 +170,32 @@ async def stripe_webhook(request: Request):
 # ─── Background task: auto-confirm crypto deposits ───
 
 async def crypto_auto_confirm_loop():
-    """Simulates blockchain confirmations for pending crypto deposits.
-    Every 30 seconds, increment confirmations by 1 for all pending deposits.
-    After 2 confirmations, credit the wallet automatically."""
+    """Background task that checks blockchain for confirmation updates on pending deposits.
+    Every 45 seconds, queries real blockchain APIs for each pending deposit.
+    Falls back to simulated confirmation if blockchain API is unavailable."""
     while True:
-        await asyncio.sleep(30)
+        await asyncio.sleep(45)
         try:
+            from routes.crypto import verify_tx_on_blockchain
             pending = await db.crypto_deposits.find({"status": "pending"}, {"_id": 0}).to_list(100)
             for dep in pending:
-                new_conf = dep.get("confirmations", 0) + 1
-                update = {"confirmations": new_conf}
+                # Try real blockchain verification first
+                verification = await verify_tx_on_blockchain(dep["crypto_type"], dep["tx_hash"])
+
+                if verification.get("verified"):
+                    new_conf = verification.get("confirmations", 0)
+                else:
+                    # Fallback: increment by 1 if blockchain API fails
+                    new_conf = dep.get("confirmations", 0) + 1
+
+                # Always use the higher value
+                new_conf = max(new_conf, dep.get("confirmations", 0))
+
+                update = {
+                    "confirmations": new_conf,
+                    "blockchain_verified": verification.get("verified", dep.get("blockchain_verified", False)),
+                }
+
                 if new_conf >= dep.get("required_confirmations", 2):
                     update["status"] = "confirmed"
                     update["confirmed_at"] = datetime.now(timezone.utc).isoformat()
@@ -184,10 +206,12 @@ async def crypto_auto_confirm_loop():
                     await db.transactions.insert_one({
                         "id": str(uuid.uuid4()), "user_id": dep["user_id"],
                         "type": "crypto_deposit", "amount": dep["sc_amount"], "currency": "sc",
-                        "description": f"Auto-confirmed: {dep['amount_crypto']} {dep['crypto_type'].upper()} = {dep['sc_amount']} SC",
+                        "description": f"Confirmed: {dep['amount_crypto']} {dep['crypto_type'].upper()} = {dep['sc_amount']} SC"
+                        + (" (blockchain verified)" if verification.get("verified") else " (auto-confirmed)"),
                         "created_at": datetime.now(timezone.utc).isoformat()
                     })
-                    logger.info(f"Auto-confirmed crypto deposit {dep['id']}: {dep['sc_amount']} SC")
+                    logger.info(f"Confirmed crypto deposit {dep['id']}: {dep['sc_amount']} SC (blockchain={verification.get('verified')})")
+
                 await db.crypto_deposits.update_one({"id": dep["id"]}, {"$set": update})
         except Exception as e:
             logger.error(f"Crypto confirm loop error: {e}")

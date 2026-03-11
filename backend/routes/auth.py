@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel
 import uuid
+import os
 import bcrypt
 import random
 from datetime import datetime, timezone
@@ -175,4 +176,40 @@ async def update_profile(req: ProfileUpdateRequest, user=Depends(get_current_use
         "id": updated['id'], "username": updated['username'],
         "email": updated['email'], "role": updated.get('role', 'human'),
         "avatar_url": updated.get('avatar_url'),
+    }
+
+
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "avatars")
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+MAX_FILE_SIZE = 2 * 1024 * 1024  # 2MB
+
+
+@router.post("/auth/avatar/upload")
+async def upload_avatar(file: UploadFile = File(...), user=Depends(get_current_user)):
+    """Upload a custom avatar image. Max 2MB, jpg/png/webp/gif."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"File type {ext} not allowed. Use jpg, png, webp, or gif")
+
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="File too large. Max 2MB")
+
+    filename = f"{user['id']}_{uuid.uuid4().hex[:8]}{ext}"
+    filepath = os.path.join(UPLOAD_DIR, filename)
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+    with open(filepath, "wb") as f:
+        f.write(content)
+
+    avatar_url = f"/api/uploads/avatars/{filename}"
+
+    await db.users.update_one({"id": user['id']}, {"$set": {"avatar_url": avatar_url}})
+
+    return {
+        "avatar_url": avatar_url,
+        "message": "Avatar uploaded successfully",
     }
