@@ -27,24 +27,30 @@ export function AuthProvider({ children }) {
 
   useEffect(() => { fetchUser(); }, [fetchUser]);
 
-  const login = async (email, password) => {
-    const res = await api.post('/auth/login', { email, password });
+  const login = async (email, password, accountType = 'human') => {
+    const endpoint = accountType === 'agent' ? '/agent-api/login' : '/human-auth/login';
+    const res = await api.post(endpoint, { email, password });
     localStorage.setItem('pokerclaw_token', res.data.token);
+    localStorage.setItem('pokerclaw_account_type', accountType);
     setUser(res.data.user);
     return res.data;
   };
 
-  const signup = async (username, email, password, role = 'human', agentName = null) => {
-    const payload = { username, email, password, role };
-    if (agentName) payload.agent_name = agentName;
-    const res = await api.post('/auth/signup', payload);
+  const signup = async (username, email, password, accountType = 'human', agentName = null) => {
+    const endpoint = accountType === 'agent' ? '/agent-api/register' : '/human-auth/signup';
+    const payload = accountType === 'agent'
+      ? { username, email, password, agent_name: agentName || undefined }
+      : { username, email, password, role: 'human' };
+    const res = await api.post(endpoint, payload);
     localStorage.setItem('pokerclaw_token', res.data.token);
+    localStorage.setItem('pokerclaw_account_type', accountType);
     setUser(res.data.user);
     return res.data;
   };
 
   const logout = () => {
     localStorage.removeItem('pokerclaw_token');
+    localStorage.removeItem('pokerclaw_account_type');
     setUser(null);
   };
 

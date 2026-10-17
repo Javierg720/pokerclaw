@@ -1,10 +1,11 @@
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import Literal
 import uuid
 import random
 from datetime import datetime, timezone
-from deps import db, get_current_user, sanitize_game_for_response
-from game_engine import create_deck, advance_game, best_hand, AGENT_PRESETS, AVATAR_URLS
+from deps import db, require_agent, require_human
+from game_engine import create_deck, advance_game
 
 router = APIRouter(prefix="/api")
 
@@ -12,8 +13,8 @@ router = APIRouter(prefix="/api")
 class TournamentBetRequest(BaseModel):
     tournament_id: str
     agent_id: str
-    amount: int
-    currency: str = "gc"
+    amount: int = Field(gt=0)
+    currency: Literal["sc", "gc"] = "gc"
 
 
 async def _create_tournament_game(agent_ids_list):
@@ -30,6 +31,7 @@ async def _create_tournament_game(agent_ids_list):
         players.append({
             "agent_id": agent['id'], "agent_name": agent['name'],
             "avatar_url": agent['avatar_url'], "strategy": agent['strategy'],
+            "is_external": agent.get('is_external', False),
             "hole_cards": [], "chips": 1000, "current_bet": 0,
             "total_bet": 0, "folded": False, "is_dealer": i == 0,
             "hand_rank": 0, "hand_name": ""
@@ -93,12 +95,18 @@ async def get_tournament(tournament_id: str):
 
 
 @router.post("/tournaments")
-async def create_tournament(user=Depends(get_current_user)):
+async def create_tournament(user=Depends(require_agent)):
     agents = await db.agents.find({}, {"_id": 0}).to_list(100)
     if len(agents) < 8:
         raise HTTPException(status_code=400, detail="Not enough agents (need 8)")
 
-    selected = random.sample(agents, 8)
+    own_agent_id = user.get("agent_id")
+    own_agent = next((agent for agent in agents if agent["id"] == own_agent_id), None)
+    if not own_agent:
+        raise HTTPException(status_code=403, detail="OpenClaw agent profile required")
+
+    opponents = [agent for agent in agents if agent["id"] != own_agent_id]
+    selected = [own_agent, *random.sample(opponents, 7)]
     agent_ids = [a['id'] for a in selected]
     random.shuffle(agent_ids)
 
@@ -131,14 +139,13 @@ async def create_tournament(user=Depends(get_current_user)):
     return {k: v for k, v in tournament.items() if k != '_id'}
 
 
-
 class TournamentJoinRequest(BaseModel):
     slot_index: int  # 0-7, which slot to replace
     agent_id: str    # agent to place in that slot
 
 
 @router.post("/tournaments/{tournament_id}/join")
-async def join_tournament(tournament_id: str, req: TournamentJoinRequest, user=Depends(get_current_user)):
+async def join_tournament(tournament_id: str, req: TournamentJoinRequest, user=Depends(require_agent)):
     """Allow an agent to join/replace a slot in a tournament that hasn't started yet."""
     t = await db.tournaments.find_one({"id": tournament_id}, {"_id": 0})
     if not t:
@@ -147,6 +154,8 @@ async def join_tournament(tournament_id: str, req: TournamentJoinRequest, user=D
         raise HTTPException(status_code=400, detail="Tournament already started. Cannot join.")
     if req.slot_index < 0 or req.slot_index >= len(t['agent_ids']):
         raise HTTPException(status_code=400, detail="Invalid slot index")
+    if req.agent_id != user.get("agent_id"):
+        raise HTTPException(status_code=403, detail="You can only seat your own OpenClaw agent")
 
     agent = await db.agents.find_one({"id": req.agent_id}, {"_id": 0})
     if not agent:
@@ -164,14 +173,15 @@ async def join_tournament(tournament_id: str, req: TournamentJoinRequest, user=D
     return save_doc
 
 
-
 @router.post("/tournaments/{tournament_id}/advance")
-async def advance_tournament(tournament_id: str, user=Depends(get_current_user)):
+async def advance_tournament(tournament_id: str, user=Depends(require_agent)):
     t = await db.tournaments.find_one({"id": tournament_id}, {"_id": 0})
     if not t:
         raise HTTPException(status_code=404, detail="Tournament not found")
     if t['status'] == 'complete':
         raise HTTPException(status_code=400, detail="Tournament already complete")
+    if user.get("agent_id") not in t.get("agent_ids", []):
+        raise HTTPException(status_code=403, detail="Your OpenClaw agent is not in this tournament")
 
     bracket = t['bracket']
 
@@ -250,7 +260,7 @@ async def advance_tournament(tournament_id: str, user=Depends(get_current_user))
 
 
 @router.post("/tournament-bets")
-async def place_tournament_bet(req: TournamentBetRequest, user=Depends(get_current_user)):
+async def place_tournament_bet(req: TournamentBetRequest, user=Depends(require_human)):
     t = await db.tournaments.find_one({"id": req.tournament_id}, {"_id": 0})
     if not t:
         raise HTTPException(status_code=404, detail="Tournament not found")
@@ -259,14 +269,13 @@ async def place_tournament_bet(req: TournamentBetRequest, user=Depends(get_curre
     if req.agent_id not in t['agent_ids']:
         raise HTTPException(status_code=400, detail="Agent not in this tournament")
 
-    wallet = await db.wallets.find_one({"user_id": user['id']}, {"_id": 0})
-    if not wallet:
-        raise HTTPException(status_code=400, detail="Wallet not found")
     balance_field = f"{req.currency}_balance"
-    if wallet.get(balance_field, 0) < req.amount:
+    result = await db.wallets.update_one(
+        {"user_id": user['id'], balance_field: {"$gte": req.amount}},
+        {"$inc": {balance_field: -req.amount}},
+    )
+    if result.modified_count != 1:
         raise HTTPException(status_code=400, detail="Insufficient balance")
-
-    await db.wallets.update_one({"user_id": user['id']}, {"$inc": {balance_field: -req.amount}})
 
     bet = {
         "id": str(uuid.uuid4()), "user_id": user['id'],

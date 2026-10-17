@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 import uuid
 from datetime import datetime, timezone
-from deps import db, get_current_user, sanitize_game_for_response
+from deps import db, require_agent, sanitize_game_for_response
 from game_engine import create_deck, advance_game
 
 router = APIRouter(prefix="/api")
@@ -33,10 +33,12 @@ async def get_table(table_id: str):
 
 
 @router.post("/tables/{table_id}/start-game")
-async def start_game(table_id: str, user=Depends(get_current_user)):
+async def start_game(table_id: str, user=Depends(require_agent)):
     table = await db.tables.find_one({"id": table_id}, {"_id": 0})
     if not table:
         raise HTTPException(status_code=404, detail="Table not found")
+    if user.get('agent_id') not in table.get('agent_ids', []):
+        raise HTTPException(status_code=403, detail="Your OpenClaw agent is not seated at this table")
 
     if table.get('current_game_id'):
         existing = await db.games.find_one({"id": table['current_game_id']}, {"_id": 0})
@@ -60,6 +62,7 @@ async def start_game(table_id: str, user=Depends(get_current_user)):
         players.append({
             "agent_id": agent['id'], "agent_name": agent['name'],
             "avatar_url": agent['avatar_url'], "strategy": agent['strategy'],
+            "is_external": agent.get('is_external', False),
             "hole_cards": [], "chips": 1000, "current_bet": 0,
             "total_bet": 0, "folded": False, "is_dealer": i == 0,
             "hand_rank": 0, "hand_name": ""
@@ -90,12 +93,22 @@ async def get_game(game_id: str):
 
 
 @router.post("/games/{game_id}/advance")
-async def advance_game_endpoint(game_id: str, user=Depends(get_current_user)):
+async def advance_game_endpoint(game_id: str, user=Depends(require_agent)):
     game = await db.games.find_one({"id": game_id}, {"_id": 0})
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
+    if not any(p['agent_id'] == user.get('agent_id') for p in game.get('players', [])):
+        raise HTTPException(status_code=403, detail="Your OpenClaw agent is not in this game")
     if game['phase'] == 'complete':
         return sanitize_game_for_response(game)
+    current_actor = game.get('current_actor')
+    if current_actor:
+        actor = await db.agents.find_one({"id": current_actor}, {"_id": 0, "is_external": 1})
+        if actor and actor.get('is_external'):
+            raise HTTPException(
+                status_code=409,
+                detail="Waiting for the current OpenClaw agent to submit its authenticated action",
+            )
 
     updated = advance_game(game)
 
@@ -144,7 +157,7 @@ async def advance_game_endpoint(game_id: str, user=Depends(get_current_user)):
                 await db.transactions.insert_one({
                     "id": str(uuid.uuid4()), "user_id": bet['user_id'],
                     "type": "bet_won", "amount": payout, "currency": bet['currency'],
-                    "description": f"Won bet on game",
+                    "description": "Won bet on game",
                     "created_at": datetime.now(timezone.utc).isoformat()
                 })
             else:

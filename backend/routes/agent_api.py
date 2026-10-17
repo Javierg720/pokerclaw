@@ -13,8 +13,8 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 import uuid
 
-from deps import db, create_token, get_current_user, generate_crypto_addresses
-from game_engine import create_deck, advance_game, STRATEGIES, AVATAR_URLS, HAND_NAMES
+from deps import db, create_token, require_agent
+from game_engine import create_deck, advance_game, STRATEGIES, AVATAR_URLS
 import bcrypt
 import random
 
@@ -76,7 +76,7 @@ async def _get_agent_for_user(user):
 
 @router.post("/register")
 async def agent_register(req: AgentRegisterRequest):
-    """Register a new agent owner account. Creates a MoltBot agent automatically."""
+    """Register a new agent account and create its OpenClaw poker profile."""
     existing = await db.users.find_one({"email": req.email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -87,7 +87,7 @@ async def agent_register(req: AgentRegisterRequest):
     hashed = bcrypt.hashpw(req.password.encode(), bcrypt.gensalt()).decode()
     user_id = str(uuid.uuid4())
 
-    agent_name = req.agent_name or f"MoltBot_{req.username}"
+    agent_name = req.agent_name or f"OpenClaw_{req.username}"
     existing_agent = await db.agents.find_one({"name": agent_name}, {"_id": 0})
     if existing_agent:
         raise HTTPException(status_code=400, detail="Agent name already taken")
@@ -97,7 +97,7 @@ async def agent_register(req: AgentRegisterRequest):
         "id": agent_id, "name": agent_name,
         "strategy": random.choice(list(STRATEGIES.keys())),
         "avatar_url": random.choice(AVATAR_URLS),
-        "tagline": f"OpenClaw-powered MoltBot owned by {req.username}",
+        "tagline": f"OpenClaw poker agent operated by {req.username}",
         "owner_id": user_id, "is_house": False, "is_external": True,
         "wins": 0, "losses": 0, "total_games": 0, "total_chips_won": 0,
         "created_at": datetime.now(timezone.utc).isoformat()
@@ -111,11 +111,10 @@ async def agent_register(req: AgentRegisterRequest):
     }
     await db.users.insert_one(user)
 
-    crypto_addresses = generate_crypto_addresses(user_id)
     wallet = {
         "id": str(uuid.uuid4()), "user_id": user_id,
         "sc_balance": 0, "gc_balance": 0,
-        "crypto_addresses": crypto_addresses, "pending_deposits": [],
+        "crypto_addresses": None, "pending_deposits": [],
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.wallets.insert_one(wallet)
@@ -124,6 +123,10 @@ async def agent_register(req: AgentRegisterRequest):
     return {
         "token": token,
         "agent": {k: v for k, v in agent.items() if k != "_id"},
+        "user": {
+            "id": user_id, "username": req.username, "email": req.email,
+            "role": "agent", "agent_id": agent_id, "avatar_url": None,
+        },
         "message": f"Agent '{agent_name}' created. Use the token for all API calls."
     }
 
@@ -142,14 +145,19 @@ async def agent_login(req: AgentLoginRequest):
     return {
         "token": token,
         "agent": agent,
-        "user_id": user['id']
+        "user_id": user['id'],
+        "user": {
+            "id": user['id'], "username": user['username'],
+            "email": user['email'], "role": "agent",
+            "agent_id": user.get('agent_id'), "avatar_url": user.get('avatar_url'),
+        },
     }
 
 
 # ─── Game state endpoints ───
 
 @router.get("/me")
-async def get_agent_info(user=Depends(get_current_user)):
+async def get_agent_info(user=Depends(require_agent)):
     """Get your agent's info and stats."""
     agent = await _get_agent_for_user(user)
     wallet = await db.wallets.find_one({"user_id": user['id']}, {"_id": 0})
@@ -163,7 +171,7 @@ async def get_agent_info(user=Depends(get_current_user)):
 
 
 @router.post("/tables/{table_id}/join")
-async def join_table(table_id: str, user=Depends(get_current_user)):
+async def join_table(table_id: str, user=Depends(require_agent)):
     """Seat your agent at a table so it can participate in games."""
     agent = await _get_agent_for_user(user)
     table = await db.tables.find_one({"id": table_id}, {"_id": 0})
@@ -177,13 +185,16 @@ async def join_table(table_id: str, user=Depends(get_current_user)):
     if table.get('current_game_id'):
         existing_game = await db.games.find_one({"id": table['current_game_id']}, {"_id": 0})
         if existing_game and existing_game['phase'] not in ('complete',):
-            raise HTTPException(status_code=400, detail="Cannot join while a game is in progress. Wait for it to finish.")
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot join while a game is in progress. Wait for it to finish.",
+            )
     await db.tables.update_one({"id": table_id}, {"$push": {"agent_ids": agent['id']}})
     return {"message": f"Agent '{agent['name']}' seated at '{table['name']}'", "table_id": table_id}
 
 
 @router.post("/tables/{table_id}/leave")
-async def leave_table(table_id: str, user=Depends(get_current_user)):
+async def leave_table(table_id: str, user=Depends(require_agent)):
     """Remove your agent from a table."""
     agent = await _get_agent_for_user(user)
     table = await db.tables.find_one({"id": table_id}, {"_id": 0})
@@ -196,7 +207,7 @@ async def leave_table(table_id: str, user=Depends(get_current_user)):
 
 
 @router.get("/tables")
-async def list_tables(user=Depends(get_current_user)):
+async def list_tables(user=Depends(require_agent)):
     """List all tables with current game summary."""
     agent = await _get_agent_for_user(user)
     tables = await db.tables.find({}, {"_id": 0}).to_list(100)
@@ -226,7 +237,7 @@ async def list_tables(user=Depends(get_current_user)):
 
 
 @router.get("/game/{game_id}/state")
-async def get_game_state(game_id: str, user=Depends(get_current_user)):
+async def get_game_state(game_id: str, user=Depends(require_agent)):
     """
     Get full game state. Your agent's hole cards are visible; other agents' cards are hidden.
     Use this to decide your next action.
@@ -261,7 +272,7 @@ async def get_game_state(game_id: str, user=Depends(get_current_user)):
 
 
 @router.post("/game/{game_id}/action")
-async def submit_action(game_id: str, req: AgentActionRequest, user=Depends(get_current_user)):
+async def submit_action(game_id: str, req: AgentActionRequest, user=Depends(require_agent)):
     """
     Submit your agent's action for the current turn.
     - action: 'fold', 'call', or 'raise'
@@ -276,7 +287,10 @@ async def submit_action(game_id: str, req: AgentActionRequest, user=Depends(get_
     if game['phase'] == 'complete':
         raise HTTPException(status_code=400, detail="Game is already complete")
     if game.get('current_actor') != agent['id']:
-        raise HTTPException(status_code=400, detail=f"It's not your agent's turn. Current actor: {game.get('current_actor')}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"It's not your agent's turn. Current actor: {game.get('current_actor')}",
+        )
     if req.action not in ('fold', 'call', 'raise'):
         raise HTTPException(status_code=400, detail="Action must be 'fold', 'call', or 'raise'")
 
@@ -358,12 +372,14 @@ async def submit_action(game_id: str, req: AgentActionRequest, user=Depends(get_
 
 
 @router.post("/game/{game_id}/start")
-async def start_game_for_table(game_id: str, user=Depends(get_current_user)):
+async def start_game_for_table(game_id: str, user=Depends(require_agent)):
     """Start a new game on a table. game_id here is actually the TABLE id."""
     agent = await _get_agent_for_user(user)
     table = await db.tables.find_one({"id": game_id}, {"_id": 0})
     if not table:
         raise HTTPException(status_code=404, detail="Table not found")
+    if agent['id'] not in table.get('agent_ids', []):
+        raise HTTPException(status_code=403, detail="Your OpenClaw agent is not seated at this table")
 
     if table.get('current_game_id'):
         existing = await db.games.find_one({"id": table['current_game_id']}, {"_id": 0})
@@ -387,6 +403,7 @@ async def start_game_for_table(game_id: str, user=Depends(get_current_user)):
         players.append({
             "agent_id": a['id'], "agent_name": a['name'],
             "avatar_url": a['avatar_url'], "strategy": a['strategy'],
+            "is_external": a.get('is_external', False),
             "hole_cards": [], "chips": 1000, "current_bet": 0,
             "total_bet": 0, "folded": False, "is_dealer": i == 0,
             "hand_rank": 0, "hand_name": ""
@@ -419,7 +436,7 @@ async def start_game_for_table(game_id: str, user=Depends(get_current_user)):
 
 
 @router.post("/game/{game_id}/advance-others")
-async def advance_other_agents(game_id: str, user=Depends(get_current_user)):
+async def advance_other_agents(game_id: str, user=Depends(require_agent)):
     """
     Advance the game through all non-external agent turns and deal phases
     until it's your agent's turn again (or the game completes).
@@ -429,17 +446,23 @@ async def advance_other_agents(game_id: str, user=Depends(get_current_user)):
     game = await db.games.find_one({"id": game_id}, {"_id": 0})
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
+    if not any(p['agent_id'] == agent['id'] for p in game.get('players', [])):
+        raise HTTPException(status_code=403, detail="Your OpenClaw agent is not in this game")
     if game['phase'] == 'complete':
         return {"game": sanitize_game_for_agent(game, agent['id']), "advances": 0}
 
     advances = 0
     max_advances = 50  # Safety limit
+    external_agents = await db.agents.find(
+        {"is_external": True}, {"_id": 0, "id": 1}
+    ).to_list(1000)
+    external_agent_ids = {item["id"] for item in external_agents}
 
     while advances < max_advances:
         if game['phase'] == 'complete':
             break
-        if game.get('current_actor') == agent['id']:
-            break  # It's your turn, stop advancing
+        if game.get('current_actor') in external_agent_ids:
+            break  # External agents must submit their own authenticated action.
 
         game = advance_game(game)
         advances += 1
@@ -487,12 +510,17 @@ async def advance_other_agents(game_id: str, user=Depends(get_current_user)):
 
     return {
         "advances": advances,
+        "waiting_for_agent_id": (
+            game.get('current_actor')
+            if game.get('current_actor') in external_agent_ids
+            else None
+        ),
         "game": sanitize_game_for_agent(game, agent['id'])
     }
 
 
 @router.get("/wallet")
-async def get_wallet(user=Depends(get_current_user)):
+async def get_wallet(user=Depends(require_agent)):
     """Get your wallet balance."""
     await _get_agent_for_user(user)
     wallet = await db.wallets.find_one({"user_id": user['id']}, {"_id": 0})
@@ -504,13 +532,12 @@ async def get_wallet(user=Depends(get_current_user)):
     }
 
 
-
 class MultiTableJoinRequest(BaseModel):
     table_ids: list[str]
 
 
 @router.post("/tables/join-multiple")
-async def join_multiple_tables(req: MultiTableJoinRequest, user=Depends(get_current_user)):
+async def join_multiple_tables(req: MultiTableJoinRequest, user=Depends(require_agent)):
     """Join your agent to multiple tables at once for multi-table play."""
     agent = await _get_agent_for_user(user)
     results = []
@@ -536,7 +563,7 @@ async def join_multiple_tables(req: MultiTableJoinRequest, user=Depends(get_curr
 
 
 @router.get("/my-games")
-async def get_my_active_games(user=Depends(get_current_user)):
+async def get_my_active_games(user=Depends(require_agent)):
     """Get all active games your agent is participating in across all tables."""
     agent = await _get_agent_for_user(user)
     # Find tables where agent is seated

@@ -279,21 +279,6 @@ export default function WalletPage() {
     }
   };
 
-  const handleCashout = async () => {
-    if (!wallet || wallet.sc_balance < 100) {
-      toast.error('Minimum cashout: 100 SC');
-      return;
-    }
-    try {
-      const res = await api.post('/wallet/cashout', { amount: wallet.sc_balance });
-      setWallet(res.data.wallet);
-      toast.success('Cashout initiated!');
-      fetchData();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'Cashout failed');
-    }
-  };
-
   if (loading) {
     return (
       <div className="main-content flex items-center justify-center">
@@ -449,17 +434,10 @@ export default function WalletPage() {
         </div>
       </div>
 
-      {/* Cashout */}
       <div className="px-4 mb-6">
-        <Button
-          onClick={handleCashout}
-          disabled={!wallet || wallet.sc_balance < 100}
-          data-testid="cashout-btn"
-          className="w-full bg-gradient-to-r from-[#00F0FF] to-[#BD00FF] text-black font-bold rounded-xl py-3 disabled:opacity-30"
-        >
-          <ArrowUpRight size={16} className="mr-2" /> CASHOUT SC TO CRYPTO
-        </Button>
-        <p className="text-[10px] text-white/20 text-center mt-2">Min cashout: 100 SC. Transfers within 24hrs.</p>
+        <div className="glass rounded-xl p-3 text-center text-[10px] text-white/30">
+          PokerClaw credits are currently for in-app play only. Cashout is disabled.
+        </div>
       </div>
 
       {/* Transactions */}

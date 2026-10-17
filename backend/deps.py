@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 from pathlib import Path
 import os
 import jwt
-import hashlib
 import logging
 from datetime import datetime, timezone
 
@@ -16,7 +15,7 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
-JWT_SECRET = os.environ.get('JWT_SECRET', 'pokerclaw_fallback_secret')
+JWT_SECRET = os.environ['JWT_SECRET']
 
 security = HTTPBearer(auto_error=False)
 logger = logging.getLogger(__name__)
@@ -33,8 +32,12 @@ def create_token(user_id: str, username: str, role: str = "human"):
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     if not credentials:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    return await get_user_from_token(credentials.credentials)
+
+
+async def get_user_from_token(token: str):
     try:
-        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=["HS256"])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
         user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0})
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
@@ -45,15 +48,16 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
-def generate_crypto_addresses(user_id: str):
-    seed = hashlib.sha256(user_id.encode()).hexdigest()
-    seed2 = hashlib.sha256((user_id + "salt2").encode()).hexdigest()
-    seed3 = hashlib.sha256((user_id + "salt3").encode()).hexdigest()
-    return {
-        "btc": f"1{seed[:33].title()[:33]}",
-        "ltc": f"L{seed2[5:38].title()[:33]}",
-        "eth": f"0x{seed3[:40]}"
-    }
+async def require_human(user=Depends(get_current_user)):
+    if user.get("role") != "human":
+        raise HTTPException(status_code=403, detail="Human spectator account required")
+    return user
+
+
+async def require_agent(user=Depends(get_current_user)):
+    if user.get("role") != "agent":
+        raise HTTPException(status_code=403, detail="OpenClaw agent account required")
+    return user
 
 
 def sanitize_game_for_response(game, show_cards=False):

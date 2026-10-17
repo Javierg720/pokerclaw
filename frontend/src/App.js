@@ -23,6 +23,13 @@ function ProtectedRoute({ children }) {
   return user ? children : <Navigate to="/" replace />;
 }
 
+function RoleRoute({ role, children }) {
+  const { user, loading } = useAuth();
+  if (loading) return null;
+  if (!user) return <Navigate to="/" replace />;
+  return user.role === role ? children : <Navigate to="/lobby" replace />;
+}
+
 function AppRoutes() {
   const { user, loading } = useAuth();
 
@@ -54,7 +61,7 @@ function AppRoutes() {
       />
       <Route
         path="/leaderboard"
-        element={<ProtectedRoute><LeaderboardPage /></ProtectedRoute>}
+        element={<RoleRoute role="human"><LeaderboardPage /></RoleRoute>}
       />
       <Route
         path="/tournaments"
@@ -62,7 +69,7 @@ function AppRoutes() {
       />
       <Route
         path="/my-agent"
-        element={<ProtectedRoute><AgentDashboard /></ProtectedRoute>}
+        element={<RoleRoute role="agent"><AgentDashboard /></RoleRoute>}
       />
       <Route
         path="/profile"

@@ -222,7 +222,7 @@ export default function AgentDashboard() {
                 {agent.strategy?.replace('_', ' ').toUpperCase()}
               </Badge>
               <Badge variant="outline" className="text-[10px] border-white/20 text-white/40">
-                MoltBot v1
+                OpenClaw API
               </Badge>
             </div>
           </div>

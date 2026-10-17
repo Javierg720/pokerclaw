@@ -7,6 +7,7 @@ import { Trophy, Swords, Crown, ChevronRight, Plus, Zap, Coins, RefreshCw } from
 import api from '../lib/api';
 import { toast } from 'sonner';
 import { sounds } from '../lib/sounds';
+import { useAuth } from '../context/AuthContext';
 
 function BracketCard({ title, agents, winnerId, runnerUpId, status, gamePhase }) {
   return (
@@ -51,6 +52,7 @@ function BracketCard({ title, agents, winnerId, runnerUpId, status, gamePhase })
 }
 
 export default function TournamentPage() {
+  const { user, isAgent, isHuman } = useAuth();
   const [tournaments, setTournaments] = useState([]);
   const [selected, setSelected] = useState(null);
   const [agents, setAgents] = useState([]);
@@ -68,18 +70,18 @@ export default function TournamentPage() {
       ]);
       setTournaments(tRes.data);
       setAgents(aRes.data);
-      if (selected) {
-        const updated = tRes.data.find(t => t.id === selected.id);
-        if (updated) setSelected(updated);
-      }
+      setSelected((current) => {
+        if (!current) return current;
+        return tRes.data.find(t => t.id === current.id) || current;
+      });
     } catch {
       toast.error('Failed to load tournaments');
     } finally {
       setLoading(false);
     }
-  }, [selected]);
+  }, []);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const createTournament = async () => {
     try {
@@ -152,14 +154,16 @@ export default function TournamentPage() {
             <Swords size={20} className="text-[#FF003C]" />
             TOURNAMENTS
           </h1>
-          <Button
-            onClick={createTournament}
-            data-testid="create-tournament-btn"
-            size="sm"
-            className="bg-[#FF003C] hover:bg-[#cc0030] text-white font-bold rounded-lg text-xs"
-          >
-            <Plus size={12} className="mr-1" /> NEW
-          </Button>
+          {isAgent && (
+            <Button
+              onClick={createTournament}
+              data-testid="create-tournament-btn"
+              size="sm"
+              className="bg-[#FF003C] hover:bg-[#cc0030] text-white font-bold rounded-lg text-xs"
+            >
+              <Plus size={12} className="mr-1" /> NEW
+            </Button>
+          )}
         </div>
       </div>
 
@@ -169,7 +173,9 @@ export default function TournamentPage() {
           {tournaments.length === 0 ? (
             <div className="text-center py-12">
               <Swords size={40} className="text-white/10 mx-auto mb-4" />
-              <p className="text-white/30 text-sm">No tournaments yet. Create one!</p>
+              <p className="text-white/30 text-sm">
+                {isAgent ? 'No tournaments yet. Create one!' : 'No live agent tournaments yet.'}
+              </p>
             </div>
           ) : (
             tournaments.map((t) => (
@@ -278,14 +284,14 @@ export default function TournamentPage() {
           </div>
 
           {/* Late Join - Swap agents before tournament starts */}
-          {selected.status === 'lobby' && (
+          {isAgent && selected.status === 'lobby' && !selected.agent_ids?.includes(user?.agent_id) && (
             <div className="glass rounded-2xl p-4 space-y-3" data-testid="tournament-late-join">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold text-white/60 uppercase tracking-widest flex items-center gap-1.5">
                   <RefreshCw size={12} className="text-[#00F0FF]" />
-                  SWAP AGENTS
+                  JOIN TOURNAMENT
                 </h4>
-                <span className="text-[9px] text-white/20">Click a slot to replace</span>
+                <span className="text-[9px] text-white/20">Choose a seat for your agent</span>
               </div>
               <div className="grid grid-cols-2 gap-1.5">
                 {(selected.agent_ids || []).map((aid, idx) => {
@@ -294,20 +300,13 @@ export default function TournamentPage() {
                     <button
                       key={`${aid}-${idx}`}
                       onClick={async () => {
-                        // Get all agents and pick a random one not in tournament
-                        const available = agents.filter(a => !selected.agent_ids.includes(a.id));
-                        if (available.length === 0) {
-                          toast.error('No other agents available');
-                          return;
-                        }
-                        const replacement = available[Math.floor(Math.random() * available.length)];
                         try {
                           const res = await api.post(`/tournaments/${selected.id}/join`, {
                             slot_index: idx,
-                            agent_id: replacement.id,
+                            agent_id: user.agent_id,
                           });
                           setSelected(res.data);
-                          toast.success(`Swapped in ${replacement.name}!`);
+                          toast.success('Your OpenClaw agent joined the tournament!');
                           fetchData();
                         } catch (err) {
                           toast.error(err.response?.data?.detail || 'Swap failed');
@@ -330,7 +329,7 @@ export default function TournamentPage() {
           )}
 
           {/* Advance Button */}
-          {selected.status !== 'complete' && (
+          {isAgent && selected.agent_ids?.includes(user?.agent_id) && selected.status !== 'complete' && (
             <Button
               onClick={advanceRound}
               disabled={advancing}
@@ -344,7 +343,7 @@ export default function TournamentPage() {
           )}
 
           {/* Tournament Betting */}
-          {selected.status !== 'complete' && (
+          {isHuman && selected.status !== 'complete' && (
             <div className="glass rounded-2xl p-4 space-y-3" data-testid="tournament-betting">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold text-white/60 uppercase tracking-widest">

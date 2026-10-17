@@ -1,7 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
-from deps import db, client, logger
+from deps import db, client, logger, get_user_from_token
 from game_engine import AGENT_PRESETS, AVATAR_URLS
 import os
 import uuid
@@ -40,8 +40,7 @@ class TableManager:
         self.connections: dict[str, list[WebSocket]] = {}
         self.chat_history: dict[str, list[dict]] = {}
 
-    async def connect(self, table_id: str, ws: WebSocket):
-        await ws.accept()
+    def connect(self, table_id: str, ws: WebSocket):
         if table_id not in self.connections:
             self.connections[table_id] = []
         self.connections[table_id].append(ws)
@@ -85,7 +84,18 @@ table_manager = TableManager()
 
 @app.websocket("/api/ws/table/{table_id}")
 async def websocket_table(websocket: WebSocket, table_id: str):
-    await table_manager.connect(table_id, websocket)
+    await websocket.accept()
+    try:
+        auth_message = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=5))
+        if auth_message.get("type") != "auth" or not auth_message.get("token"):
+            await websocket.close(code=1008, reason="Authentication required")
+            return
+        user = await get_user_from_token(auth_message["token"])
+    except Exception:
+        await websocket.close(code=1008, reason="Invalid authentication")
+        return
+
+    table_manager.connect(table_id, websocket)
     try:
         count = table_manager.spectator_count(table_id)
         await table_manager.broadcast(table_id, {"type": "spectator_count", "count": count})
@@ -100,12 +110,11 @@ async def websocket_table(websocket: WebSocket, table_id: str):
                 if msg.get("type") == "ping":
                     await websocket.send_json({"type": "pong"})
                 elif msg.get("type") == "chat":
-                    username = msg.get("username", "Spectator")
                     text = msg.get("text", "")[:200]  # Limit length
                     if text.strip():
                         chat_msg = {
                             "type": "chat",
-                            "username": username,
+                            "username": user.get("username", "Spectator"),
                             "text": text,
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                         }
@@ -117,7 +126,7 @@ async def websocket_table(websocket: WebSocket, table_id: str):
                         await table_manager.broadcast(table_id, {
                             "type": "reaction",
                             "emoji": emoji,
-                            "username": msg.get("username", ""),
+                            "username": user.get("username", ""),
                         })
             except json.JSONDecodeError:
                 pass
@@ -167,63 +176,10 @@ async def stripe_webhook(request: Request):
     return {"status": "ok"}
 
 
-# ─── Background task: auto-confirm crypto deposits ───
-
-async def crypto_auto_confirm_loop():
-    """Background task that checks blockchain for confirmation updates on pending deposits.
-    Every 45 seconds, queries real blockchain APIs for each pending deposit.
-    Falls back to simulated confirmation if blockchain API is unavailable."""
-    while True:
-        await asyncio.sleep(45)
-        try:
-            from routes.crypto import verify_tx_on_blockchain
-            pending = await db.crypto_deposits.find({"status": "pending"}, {"_id": 0}).to_list(100)
-            for dep in pending:
-                # Try real blockchain verification first
-                verification = await verify_tx_on_blockchain(dep["crypto_type"], dep["tx_hash"])
-
-                if verification.get("verified"):
-                    new_conf = verification.get("confirmations", 0)
-                else:
-                    # Fallback: increment by 1 if blockchain API fails
-                    new_conf = dep.get("confirmations", 0) + 1
-
-                # Always use the higher value
-                new_conf = max(new_conf, dep.get("confirmations", 0))
-
-                update = {
-                    "confirmations": new_conf,
-                    "blockchain_verified": verification.get("verified", dep.get("blockchain_verified", False)),
-                }
-
-                if new_conf >= dep.get("required_confirmations", 2):
-                    update["status"] = "confirmed"
-                    update["confirmed_at"] = datetime.now(timezone.utc).isoformat()
-                    await db.wallets.update_one(
-                        {"user_id": dep["user_id"]},
-                        {"$inc": {"sc_balance": dep["sc_amount"]}}
-                    )
-                    await db.transactions.insert_one({
-                        "id": str(uuid.uuid4()), "user_id": dep["user_id"],
-                        "type": "crypto_deposit", "amount": dep["sc_amount"], "currency": "sc",
-                        "description": f"Confirmed: {dep['amount_crypto']} {dep['crypto_type'].upper()} = {dep['sc_amount']} SC"
-                        + (" (blockchain verified)" if verification.get("verified") else " (auto-confirmed)"),
-                        "created_at": datetime.now(timezone.utc).isoformat()
-                    })
-                    logger.info(f"Confirmed crypto deposit {dep['id']}: {dep['sc_amount']} SC (blockchain={verification.get('verified')})")
-
-                await db.crypto_deposits.update_one({"id": dep["id"]}, {"$set": update})
-        except Exception as e:
-            logger.error(f"Crypto confirm loop error: {e}")
-
-
 # ─── Startup - Seed Data ───
 
 @app.on_event("startup")
 async def seed_data():
-    # Start background crypto confirmation task
-    asyncio.create_task(crypto_auto_confirm_loop())
-
     agent_count = await db.agents.count_documents({"is_house": True})
     if agent_count == 0:
         old_count = await db.agents.count_documents({})

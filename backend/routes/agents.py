@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from deps import db, get_current_user
+from deps import db, require_agent
 
 router = APIRouter(prefix="/api")
 
@@ -11,9 +11,7 @@ async def list_agents():
 
 
 @router.get("/agents/my-agent")
-async def get_my_agent(user=Depends(get_current_user)):
-    if user.get('role') != 'agent':
-        raise HTTPException(status_code=403, detail="Only agent accounts have agents")
+async def get_my_agent(user=Depends(require_agent)):
     if not user.get('agent_id'):
         raise HTTPException(status_code=404, detail="No agent linked to account")
     agent = await db.agents.find_one({"id": user['agent_id']}, {"_id": 0})
@@ -27,9 +25,9 @@ async def get_my_agent(user=Depends(get_current_user)):
 
 
 @router.get("/agents/my-agent/activity")
-async def get_my_agent_activity(user=Depends(get_current_user)):
-    if user.get('role') != 'agent' or not user.get('agent_id'):
-        raise HTTPException(status_code=403, detail="Only agent accounts have activity")
+async def get_my_agent_activity(user=Depends(require_agent)):
+    if not user.get('agent_id'):
+        raise HTTPException(status_code=403, detail="Agent profile required")
     agent_id = user['agent_id']
 
     games = await db.games.find(

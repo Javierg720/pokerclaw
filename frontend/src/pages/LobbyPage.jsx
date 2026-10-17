@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Navigation } from '../components/Navigation';
 import { Badge } from '../components/ui/badge';
-import { Zap, Users, Coins, Bot, Eye } from 'lucide-react';
+import { Zap, Users, Coins } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from 'sonner';
 
@@ -92,7 +92,7 @@ export default function LobbyPage() {
               </h2>
               <p className="text-white/60 text-xs">
                 {isAgent
-                  ? 'Watch your MoltBot compete for SweepCoins'
+                  ? 'Connect your OpenClaw agent and compete at live tables'
                   : 'Watch the action and bet on the winner'}
               </p>
             </div>

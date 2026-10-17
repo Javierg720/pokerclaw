@@ -297,7 +297,7 @@ function PokerTableVisual({ game, showCards, currentActor, timerPct, lastAction 
 export default function TablePage() {
   const { tableId } = useParams();
   const navigate = useNavigate();
-  const { isHuman } = useAuth();
+  const { isHuman, isAgent } = useAuth();
   const [table, setTable] = useState(null);
   const [game, setGame] = useState(null);
   const [autoPlay, setAutoPlay] = useState(false);
@@ -371,7 +371,7 @@ export default function TablePage() {
     if (curr === 'showdown' || curr === 'complete') {
       if (game.winner_name) sounds.winFanfare();
     }
-  }, [game?.display_phase, game?.phase, game?.winner_name]);
+  }, [game]);
 
   // Play action sound when last_action changes
   useEffect(() => {
@@ -459,34 +459,23 @@ export default function TablePage() {
     return () => {
       if (autoAdvanceRef.current) clearTimeout(autoAdvanceRef.current);
     };
-  }, [autoPlay, game?.phase, game?.current_actor, game?.turn_index, advanceGame, timerMax]);
+  }, [autoPlay, game, advanceGame, timerMax]);
 
   const toggleSound = () => {
     const on = sounds.toggle();
     setSoundOn(on);
   };
 
-  const chatUsername = (() => {
-    try {
-      const token = localStorage.getItem('pokerclaw_token');
-      if (token) {
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        return payload.username || 'Spectator';
-      }
-    } catch { /* ignore */ }
-    return 'Spectator';
-  })();
-
   const handleSendChat = (text) => {
-    send({ type: 'chat', username: chatUsername, text });
+    send({ type: 'chat', text });
   };
 
   const handleSendReaction = (emoji) => {
-    send({ type: 'reaction', emoji, username: chatUsername });
+    send({ type: 'reaction', emoji });
   };
 
   const displayPhase = game?.display_phase || game?.phase;
-  const canBet = game && !['showdown', 'complete', 'waiting'].includes(displayPhase);
+  const canBet = isHuman && game && !['showdown', 'complete', 'waiting'].includes(displayPhase);
   const showCards = game && ['showdown', 'complete'].includes(displayPhase);
   const lastActions = actions.slice(-6);
   const currentActor = game?.current_actor;
@@ -559,14 +548,20 @@ export default function TablePage() {
               )}
             </div>
           )}
-          <Button
-            onClick={startGame}
-            data-testid="start-game-btn"
-            className="bg-[#FF003C] hover:bg-[#cc0030] text-white font-bold px-8 py-3 rounded-xl glow-red"
-          >
-            <Play size={16} className="mr-2" />
-            {game?.phase === 'complete' ? 'NEW HAND' : 'START GAME'}
-          </Button>
+          {isAgent ? (
+            <Button
+              onClick={startGame}
+              data-testid="start-game-btn"
+              className="bg-[#FF003C] hover:bg-[#cc0030] text-white font-bold px-8 py-3 rounded-xl glow-red"
+            >
+              <Play size={16} className="mr-2" />
+              {game?.phase === 'complete' ? 'NEW HAND' : 'START GAME'}
+            </Button>
+          ) : (
+            <div className="glass rounded-xl px-5 py-3 text-center text-sm text-white/50">
+              Waiting for OpenClaw agents to start the next hand
+            </div>
+          )}
         </div>
       ) : (
         /* Active game - Poker Table View */
@@ -611,7 +606,7 @@ export default function TablePage() {
           )}
 
           {/* Controls */}
-          <div className="flex items-center gap-3 mx-2">
+          {isAgent && <div className="flex items-center gap-3 mx-2">
             <Button
               onClick={advanceGame}
               disabled={advancing || game.phase === 'complete'}
@@ -632,7 +627,7 @@ export default function TablePage() {
               <Zap size={14} className="mr-1" />
               AUTO
             </Button>
-          </div>
+          </div>}
 
           {/* Betting Panel */}
           <div className="mx-2">

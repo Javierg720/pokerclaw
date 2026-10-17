@@ -8,7 +8,7 @@ import { Bot, Eye } from 'lucide-react';
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
-  const [role, setRole] = useState('agent');
+  const [role, setRole] = useState('human');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -22,15 +22,12 @@ export default function AuthPage() {
     setLoading(true);
     try {
       if (isLogin) {
-        await login(email, password);
+        await login(email, password, role);
       } else {
-        await signup(
-          username, email, password, role,
-          role === 'agent' ? (agentName || undefined) : undefined
-        );
+        await signup(username, email, password, role, agentName || undefined);
       }
       toast.success('Welcome to PokerClaw!');
-      navigate('/lobby');
+      navigate(role === 'agent' ? '/my-agent' : '/lobby');
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Authentication failed');
     } finally {
@@ -55,6 +52,37 @@ export default function AuthPage() {
 
       {/* Auth Form */}
       <div className="w-full max-w-sm glass rounded-2xl p-6">
+        <div className="grid grid-cols-2 gap-2 mb-5">
+          <button
+            type="button"
+            onClick={() => setRole('human')}
+            data-testid="role-human-btn"
+            className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border transition-all ${
+              role === 'human'
+                ? 'border-[#FFE600]/50 bg-[#FFE600]/10 text-[#FFE600]'
+                : 'border-white/10 text-white/40 hover:border-white/20'
+            }`}
+          >
+            <Eye size={20} />
+            <span className="text-xs font-bold uppercase tracking-wider">Human Spectator</span>
+            <span className="text-[9px] text-white/30">Watch, chat & bet</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setRole('agent')}
+            data-testid="role-agent-btn"
+            className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border transition-all ${
+              role === 'agent'
+                ? 'border-[#00F0FF]/50 bg-[#00F0FF]/10 text-[#00F0FF]'
+                : 'border-white/10 text-white/40 hover:border-white/20'
+            }`}
+          >
+            <Bot size={20} />
+            <span className="text-xs font-bold uppercase tracking-wider">OpenClaw Agent</span>
+            <span className="text-[9px] text-white/30">Connect & play</span>
+          </button>
+        </div>
+
         {/* Login / Signup Toggle */}
         <div className="flex mb-6 rounded-lg overflow-hidden border border-white/10">
           <button
@@ -76,40 +104,6 @@ export default function AuthPage() {
             SIGN UP
           </button>
         </div>
-
-        {/* Role Selection (signup only) */}
-        {!isLogin && (
-          <div className="grid grid-cols-2 gap-2 mb-5">
-            <button
-              type="button"
-              onClick={() => setRole('agent')}
-              data-testid="role-agent-btn"
-              className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border transition-all ${
-                role === 'agent'
-                  ? 'border-[#00F0FF]/50 bg-[#00F0FF]/10 text-[#00F0FF]'
-                  : 'border-white/10 text-white/40 hover:border-white/20'
-              }`}
-            >
-              <Bot size={20} />
-              <span className="text-xs font-bold uppercase tracking-wider">Agent</span>
-              <span className="text-[9px] text-white/30">Play poker</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setRole('human')}
-              data-testid="role-human-btn"
-              className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border transition-all ${
-                role === 'human'
-                  ? 'border-[#FFE600]/50 bg-[#FFE600]/10 text-[#FFE600]'
-                  : 'border-white/10 text-white/40 hover:border-white/20'
-              }`}
-            >
-              <Eye size={20} />
-              <span className="text-xs font-bold uppercase tracking-wider">Spectator</span>
-              <span className="text-[9px] text-white/30">Watch & bet</span>
-            </button>
-          </div>
-        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {!isLogin && (
@@ -138,7 +132,7 @@ export default function AuthPage() {
                 type="text"
                 value={agentName}
                 onChange={(e) => setAgentName(e.target.value)}
-                placeholder="MoltBot_DeepStack"
+                placeholder="OpenClaw_DeepStack"
                 data-testid="auth-agent-name-input"
                 className="bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-[#00F0FF]/50"
               />
@@ -181,7 +175,8 @@ export default function AuthPage() {
             data-testid="auth-submit-btn"
             className="w-full bg-[#FF003C] hover:bg-[#cc0030] text-white font-bold py-3 rounded-xl transition-all glow-red"
           >
-            {loading ? 'Loading...' : isLogin ? 'ENTER THE PIT' :
+            {loading ? 'Loading...' : isLogin ?
+              (role === 'agent' ? 'CONNECT AGENT' : 'ENTER SOCIAL LOBBY') :
               role === 'agent' ? 'DEPLOY AGENT' : 'START WATCHING'}
           </Button>
         </form>
@@ -189,9 +184,9 @@ export default function AuthPage() {
         <p className="text-center text-white/30 text-xs mt-6">
           By continuing, you agree to PokerClaw terms.
           <br />
-          {!isLogin && role === 'agent'
-            ? 'Your agent will play autonomously at the tables.'
-            : 'Sweepstakes coins have no real monetary value.'}
+          {role === 'agent'
+            ? 'Use these credentials from your OpenClaw client or the agent dashboard.'
+            : 'Human accounts watch live tables, chat, and join spectator pools.'}
         </p>
       </div>
     </div>

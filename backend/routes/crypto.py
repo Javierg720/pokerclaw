@@ -1,11 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-import os
-import uuid
 import httpx
 import time
 import logging
-from datetime import datetime, timezone
 from deps import db, get_current_user
 from typing import Dict
 
@@ -81,10 +78,16 @@ async def verify_tx_on_blockchain(crypto_type: str, tx_hash: str) -> dict:
             resp = await client.get(api_url.format(tx_hash=tx_hash))
 
             if resp.status_code == 404:
-                return {"verified": False, "confirmations": 0, "amount": 0, "error": "Transaction not found on blockchain"}
+                return {
+                    "verified": False, "confirmations": 0, "amount": 0,
+                    "error": "Transaction not found on blockchain",
+                }
 
             if resp.status_code != 200:
-                return {"verified": False, "confirmations": 0, "amount": 0, "error": f"Blockchain API returned {resp.status_code}"}
+                return {
+                    "verified": False, "confirmations": 0, "amount": 0,
+                    "error": f"Blockchain API returned {resp.status_code}",
+                }
 
             data = resp.json()
 
@@ -148,71 +151,10 @@ async def crypto_prices():
 
 @router.post("/crypto/deposit")
 async def submit_crypto_deposit(req: CryptoDepositRequest, user=Depends(get_current_user)):
-    if user.get('role') != 'agent':
-        raise HTTPException(status_code=403, detail="Only agent accounts can deposit crypto")
-    if req.crypto_type not in CRYPTO_COIN_IDS:
-        raise HTTPException(status_code=400, detail="Unsupported crypto. Use btc, ltc, or eth")
-    if req.amount_crypto <= 0:
-        raise HTTPException(status_code=400, detail="Amount must be positive")
-
-    existing = await db.crypto_deposits.find_one({"tx_hash": req.tx_hash}, {"_id": 0})
-    if existing:
-        raise HTTPException(status_code=400, detail="Transaction already submitted")
-
-    # Attempt real blockchain verification
-    verification = await verify_tx_on_blockchain(req.crypto_type, req.tx_hash)
-
-    prices = await get_crypto_prices()
-    price_usd = prices.get(req.crypto_type, {}).get("usd", 0)
-    if price_usd <= 0:
-        raise HTTPException(status_code=500, detail="Unable to fetch crypto price")
-
-    usd_value = req.amount_crypto * price_usd
-    sc_amount = int(usd_value * 100)
-
-    initial_confirmations = verification.get("confirmations", 0) if verification.get("verified") else 0
-
-    deposit = {
-        "id": str(uuid.uuid4()), "user_id": user['id'],
-        "crypto_type": req.crypto_type, "tx_hash": req.tx_hash,
-        "amount_crypto": req.amount_crypto, "price_usd_at_submit": price_usd,
-        "usd_value": round(usd_value, 2), "sc_amount": sc_amount,
-        "confirmations": initial_confirmations, "required_confirmations": 2,
-        "status": "pending",
-        "blockchain_verified": verification.get("verified", False),
-        "blockchain_amount": verification.get("amount", 0),
-        "verification_error": verification.get("error"),
-        "created_at": datetime.now(timezone.utc).isoformat(), "confirmed_at": None,
-    }
-
-    # If already has enough confirmations on-chain, auto-credit
-    if initial_confirmations >= 2 and verification.get("verified"):
-        deposit["status"] = "confirmed"
-        deposit["confirmed_at"] = datetime.now(timezone.utc).isoformat()
-        await db.wallets.update_one(
-            {"user_id": user['id']},
-            {"$inc": {"sc_balance": sc_amount}}
-        )
-        await db.transactions.insert_one({
-            "id": str(uuid.uuid4()), "user_id": user['id'],
-            "type": "crypto_deposit", "amount": sc_amount, "currency": "sc",
-            "description": f"Blockchain-verified: {req.amount_crypto} {req.crypto_type.upper()} (${round(usd_value, 2)}) = {sc_amount} SC",
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
-
-    await db.crypto_deposits.insert_one(deposit)
-
-    return {
-        "deposit_id": deposit["id"], "crypto_type": req.crypto_type,
-        "amount_crypto": req.amount_crypto, "price_usd": price_usd,
-        "usd_value": round(usd_value, 2), "sc_amount": sc_amount,
-        "status": deposit["status"],
-        "blockchain_verified": verification.get("verified", False),
-        "confirmations": initial_confirmations,
-        "message": f"Deposit submitted. {sc_amount} SC will be credited after 2 blockchain confirmations."
-        if deposit["status"] == "pending"
-        else f"Deposit confirmed! {sc_amount} SC credited.",
-    }
+    raise HTTPException(
+        status_code=410,
+        detail="Crypto deposits are disabled until custody-address verification is configured. Use Stripe checkout.",
+    )
 
 
 @router.get("/crypto/deposits")
@@ -226,49 +168,10 @@ async def get_crypto_deposits(user=Depends(get_current_user)):
 @router.post("/crypto/deposits/{deposit_id}/confirm")
 async def simulate_confirm_deposit(deposit_id: str, user=Depends(get_current_user)):
     """Manual re-check of a deposit's blockchain status."""
-    deposit = await db.crypto_deposits.find_one(
-        {"id": deposit_id, "user_id": user['id']}, {"_id": 0}
+    raise HTTPException(
+        status_code=410,
+        detail="Crypto deposit confirmation is disabled until custody-address verification is configured.",
     )
-    if not deposit:
-        raise HTTPException(status_code=404, detail="Deposit not found")
-    if deposit["status"] == "confirmed":
-        raise HTTPException(status_code=400, detail="Deposit already confirmed")
-
-    # Re-verify on blockchain
-    verification = await verify_tx_on_blockchain(deposit["crypto_type"], deposit["tx_hash"])
-    new_confirmations = verification.get("confirmations", deposit["confirmations"])
-
-    # Use the higher of stored vs blockchain confirmations
-    new_confirmations = max(new_confirmations, deposit["confirmations"] + 1)
-
-    update = {
-        "confirmations": new_confirmations,
-        "blockchain_verified": verification.get("verified", deposit.get("blockchain_verified", False)),
-    }
-
-    if new_confirmations >= deposit["required_confirmations"]:
-        update["status"] = "confirmed"
-        update["confirmed_at"] = datetime.now(timezone.utc).isoformat()
-        await db.wallets.update_one(
-            {"user_id": user['id']},
-            {"$inc": {"sc_balance": deposit["sc_amount"]}}
-        )
-        await db.transactions.insert_one({
-            "id": str(uuid.uuid4()), "user_id": user['id'],
-            "type": "crypto_deposit", "amount": deposit["sc_amount"], "currency": "sc",
-            "description": f"Crypto deposit: {deposit['amount_crypto']} {deposit['crypto_type'].upper()} (${deposit['usd_value']}) = {deposit['sc_amount']} SC",
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
-
-    await db.crypto_deposits.update_one({"id": deposit_id}, {"$set": update})
-
-    return {
-        "deposit_id": deposit_id, "confirmations": new_confirmations,
-        "required": deposit["required_confirmations"],
-        "status": update.get("status", "pending"),
-        "blockchain_verified": update.get("blockchain_verified", False),
-        "sc_credited": deposit["sc_amount"] if update.get("status") == "confirmed" else 0,
-    }
 
 
 @router.get("/crypto/verify/{crypto_type}/{tx_hash}")
