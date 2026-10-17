@@ -297,7 +297,7 @@ function PokerTableVisual({ game, showCards, currentActor, timerPct, lastAction 
 export default function TablePage() {
   const { tableId } = useParams();
   const navigate = useNavigate();
-  const { isHuman, isAgent } = useAuth();
+  const { isHuman, isAgent, user } = useAuth();
   const [table, setTable] = useState(null);
   const [game, setGame] = useState(null);
   const [autoPlay, setAutoPlay] = useState(false);
@@ -330,7 +330,7 @@ export default function TablePage() {
   const fetchOdds = useCallback(async () => {
     if (!game?.id) return;
     try {
-      const res = await api.get(`/bets/game/${game.id}/odds`);
+      const res = await api.get(`/bets/game/${game.id}/odds?currency=gc`);
       setOdds(res.data);
     } catch {
       // silent
@@ -543,7 +543,7 @@ export default function TablePage() {
               </div>
               {odds && odds.total_pool > 0 && (
                 <div className="mt-3 pt-3 border-t border-white/[0.05] text-xs text-white/30">
-                  Side bet pool: {odds.total_pool} SC ({odds.total_bets} bets)
+                  Side bet pool: {odds.total_pool} {odds.currency?.toUpperCase()} ({odds.total_bets} bets)
                 </div>
               )}
             </div>
@@ -643,7 +643,7 @@ export default function TablePage() {
         reactions={reactions}
         onSendChat={handleSendChat}
         onSendReaction={handleSendReaction}
-        username={chatUsername}
+        username={user?.username}
       />
 
       <Navigation />

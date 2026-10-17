@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
 from typing import Literal
 import uuid
 from datetime import datetime, timezone
-from deps import db, require_human
+from deps import db, require_human, bet_limiter
+from sweepstakes import ensure_sc_play_eligible
 
 router = APIRouter(prefix="/api")
 
@@ -12,11 +13,20 @@ class BetRequest(BaseModel):
     game_id: str
     agent_id: str
     amount: int = Field(gt=0)
-    currency: Literal["sc", "gc"] = "sc"
+    currency: Literal["sc", "gc"] = "gc"
 
 
 @router.post("/bets")
-async def place_bet(req: BetRequest, user=Depends(require_human)):
+async def place_bet(req: BetRequest, request: Request, user=Depends(require_human)):
+    # Rate limit: 60 bets per user per minute
+    if not await bet_limiter.is_allowed(user["id"]):
+        raise HTTPException(
+            status_code=429, detail="Bet rate limit exceeded. Max 60 bets per minute."
+        )
+
+    if req.currency == "sc":
+        await ensure_sc_play_eligible(user)
+
     game = await db.games.find_one({"id": req.game_id}, {"_id": 0})
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
@@ -70,8 +80,11 @@ async def get_game_bets(game_id: str):
 
 
 @router.get("/bets/game/{game_id}/odds")
-async def get_game_odds(game_id: str):
-    bets = await db.bets.find({"game_id": game_id, "status": "pending"}, {"_id": 0}).to_list(1000)
+async def get_game_odds(game_id: str, currency: Literal["sc", "gc"] = "gc"):
+    bets = await db.bets.find(
+        {"game_id": game_id, "status": "pending", "currency": currency},
+        {"_id": 0},
+    ).to_list(1000)
     game = await db.games.find_one({"id": game_id}, {"_id": 0})
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
@@ -102,4 +115,9 @@ async def get_game_odds(game_id: str):
             "multiplier": multiplier, "folded": p.get('folded', False),
         })
 
-    return {"total_pool": total_pool, "total_bets": len(bets), "odds": odds}
+    return {
+        "currency": currency,
+        "total_pool": total_pool,
+        "total_bets": len(bets),
+        "odds": odds,
+    }

@@ -1,4 +1,7 @@
-"""Shared database, auth, and utility dependencies for all routes."""
+"""Shared database, auth, rate-limiting, and utility dependencies for all routes."""
+import asyncio
+import time
+from collections import defaultdict
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -12,6 +15,18 @@ from datetime import datetime, timezone
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
+# ── Startup validation ──────────────────────────────────────────────────────
+_REQUIRED_ENV = ["MONGO_URL", "DB_NAME", "JWT_SECRET"]
+_missing = [k for k in _REQUIRED_ENV if not os.environ.get(k, "").strip()]
+if _missing:
+    raise SystemExit(
+        "\n\nPokerClaw backend cannot start — missing required environment variables:\n"
+        + "".join(f"  • {k}\n" for k in _missing)
+        + "\nCopy backend/.env.example to backend/.env and fill in every value.\n"
+        + "Generate a secure JWT_SECRET with:\n"
+        + "  python -c \"import secrets; print(secrets.token_hex(32))\"\n"
+    )
+
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
@@ -20,6 +35,71 @@ JWT_SECRET = os.environ['JWT_SECRET']
 security = HTTPBearer(auto_error=False)
 logger = logging.getLogger(__name__)
 
+
+# ── In-memory sliding-window rate limiter ───────────────────────────────────
+# Suitable for single-process deployments.  Replace with a Redis-backed
+# implementation (e.g. slowapi + redis) for multi-process/multi-replica setups.
+
+class _SlidingWindow:
+    def __init__(self, limit: int, window_seconds: int):
+        self._limit = limit
+        self._window = window_seconds
+        self._buckets: dict[str, list[float]] = defaultdict(list)
+        self._lock = asyncio.Lock()
+
+    async def is_allowed(self, key: str) -> bool:
+        """Returns True if the request is within the rate limit, False otherwise."""
+        now = time.monotonic()
+        cutoff = now - self._window
+        async with self._lock:
+            ts = [t for t in self._buckets[key] if t > cutoff]
+            if len(ts) >= self._limit:
+                self._buckets[key] = ts
+                return False
+            ts.append(now)
+            self._buckets[key] = ts
+            return True
+
+
+# 10 auth attempts per IP per 15 minutes (login + forgot-password)
+login_limiter = _SlidingWindow(limit=10, window_seconds=900)
+# 5 signups per IP per hour
+signup_limiter = _SlidingWindow(limit=5, window_seconds=3600)
+# 60 bets per user-id per minute
+bet_limiter = _SlidingWindow(limit=60, window_seconds=60)
+# 5 daily-claim attempts per user-id per minute (the DB is the real guard)
+claim_limiter = _SlidingWindow(limit=5, window_seconds=60)
+
+
+# ── Database indexes ─────────────────────────────────────────────────────────
+
+async def ensure_database_indexes() -> None:
+    """Create all idempotency and lookup indexes at startup."""
+    index_specs = [
+        # Users
+        (db.users, "id",       "user_id_unique",       True),
+        (db.users, "email",    "user_email_unique",     True),
+        (db.users, "username", "user_username_unique",  True),
+        # Agents
+        (db.agents, "id",  "agent_id_unique", True),
+        # Wallets
+        (db.wallets, "id",      "wallet_id_unique",      True),
+        (db.wallets, "user_id", "wallet_user_id_unique", True),
+        # Games
+        (db.games, "id", "game_id_unique", True),
+        # Bets
+        (db.bets, "id",             "bet_id_unique",            True),
+        (db.tournament_bets, "id",  "tournament_bet_id_unique", True),
+        # Transactions
+        (db.transactions, "id", "transaction_id_unique", True),
+        # Sweepstakes
+        (db.sweepstakes_profiles, "user_id", "sweepstakes_profile_user_id_unique", True),
+    ]
+    for collection, field, name, unique in index_specs:
+        await collection.create_index(field, unique=unique, name=name)
+
+
+# ── Auth helpers ─────────────────────────────────────────────────────────────
 
 def create_token(user_id: str, username: str, role: str = "human"):
     return jwt.encode(
@@ -75,3 +155,4 @@ def sanitize_game_for_response(game, show_cards=False):
     g['display_phase'] = phase_display.get(g.get('phase'), g.get('phase'))
     g['is_betting'] = g.get('phase', '').endswith('_betting')
     return g
+

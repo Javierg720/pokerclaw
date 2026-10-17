@@ -142,6 +142,25 @@ def _get_active_players(players):
     return [p for p in players if not p['folded'] and p['chips'] > 0]
 
 
+def _next_actor(players, current_agent_id):
+    """Return the agent_id of the next active player after current_agent_id in
+    the original players-list order.  Returns None if no other active player
+    exists (caller should then trigger a showdown check)."""
+    n = len(players)
+    start = next(
+        (i for i, p in enumerate(players) if p['agent_id'] == current_agent_id),
+        -1,
+    )
+    if start == -1:
+        active = _get_active_players(players)
+        return active[0]['agent_id'] if active else None
+    for step in range(1, n + 1):
+        candidate = players[(start + step) % n]
+        if not candidate['folded'] and candidate['chips'] > 0:
+            return candidate['agent_id']
+    return None
+
+
 def _get_betting_phase(game_phase):
     """Map game phase to the betting round name."""
     mapping = {
@@ -196,23 +215,32 @@ def advance_game(game, external_action=None):
         game['round_phase'] = 'preflop'
         active = _get_active_players(players)
         game['current_actor'] = active[0]['agent_id'] if active else None
+        # Per-round counters: track how many players have acted and the
+        # initial count so a mid-round fold doesn't prematurely end the round.
+        game['round_initial_player_count'] = len(active)
+        game['actions_this_round'] = 0
 
     # ── BETTING ROUNDS (turn-by-turn) ──
     elif phase in ('preflop_betting', 'flop_betting', 'turn_betting', 'river_betting'):
         active = _get_active_players(players)
-        turn_idx = game.get('turn_index', 0)
+        # Backwards-compatible: old games may lack these keys; derive safe defaults.
+        actions_done = game.get('actions_this_round', game.get('turn_index', 0))
+        round_initial = game.get('round_initial_player_count', len(active))
 
         # Check if only one player left (everyone else folded)
         if len(active) <= 1:
             # Skip to showdown
             game['phase'] = 'showdown'
             game['turn_index'] = 0
-        elif turn_idx >= len(active):
-            # All players have acted this round -> transition to next phase
+            game['current_actor'] = None
+        elif actions_done >= round_initial:
+            # All initial players have acted this round -> transition to next phase
             for p in players:
                 p['current_bet'] = 0
             game['turn_index'] = 0
             game['round_bet'] = 0
+            game['actions_this_round'] = 0
+            game['current_actor'] = None
 
             if phase == 'preflop_betting':
                 game['phase'] = 'flop_deal'
@@ -223,8 +251,14 @@ def advance_game(game, external_action=None):
             elif phase == 'river_betting':
                 game['phase'] = 'showdown'
         else:
-            # Process ONE agent's action
-            player = active[turn_idx]
+            # Process ONE agent's action.
+            # Identify whose turn it is via current_actor (authoritative), falling
+            # back to the legacy turn_index approach for old game documents.
+            current_actor_id = game.get('current_actor')
+            player = next(
+                (p for p in active if p['agent_id'] == current_actor_id),
+                active[game.get('turn_index', 0) % len(active)],
+            )
             betting_phase = _get_betting_phase(phase)
 
             # Check if external action was submitted for this agent
@@ -279,14 +313,16 @@ def advance_game(game, external_action=None):
                     'action': 'call', 'amount': call_amt
                 }
 
-            game['turn_index'] = turn_idx + 1
-            # Set who acts next (for frontend timer display)
-            next_active = _get_active_players(players)
-            next_idx = game['turn_index']
-            if next_idx < len(next_active):
-                game['current_actor'] = next_active[next_idx]['agent_id']
-            else:
+            game['turn_index'] = game.get('turn_index', 0) + 1
+            game['actions_this_round'] = actions_done + 1
+            # When the last player of the round has acted, signal no current actor
+            # so the frontend doesn't show anyone as "thinking" before the phase
+            # transition.  Otherwise, find the next active player by scanning the
+            # original players-list order (fixes the fold-skips-next-player bug).
+            if game['actions_this_round'] >= game.get('round_initial_player_count', round_initial):
                 game['current_actor'] = None
+            else:
+                game['current_actor'] = _next_actor(players, player['agent_id'])
 
     # ── DEAL PHASES ──
     elif phase == 'flop_deal':
@@ -298,6 +334,8 @@ def advance_game(game, external_action=None):
         game['round_phase'] = 'flop'
         active = _get_active_players(players)
         game['current_actor'] = active[0]['agent_id'] if active else None
+        game['round_initial_player_count'] = len(active)
+        game['actions_this_round'] = 0
 
     elif phase == 'turn_deal':
         deck.pop()  # burn
@@ -308,6 +346,8 @@ def advance_game(game, external_action=None):
         game['round_phase'] = 'turn'
         active = _get_active_players(players)
         game['current_actor'] = active[0]['agent_id'] if active else None
+        game['round_initial_player_count'] = len(active)
+        game['actions_this_round'] = 0
 
     elif phase == 'river_deal':
         deck.pop()  # burn
@@ -318,6 +358,8 @@ def advance_game(game, external_action=None):
         game['round_phase'] = 'river'
         active = _get_active_players(players)
         game['current_actor'] = active[0]['agent_id'] if active else None
+        game['round_initial_player_count'] = len(active)
+        game['actions_this_round'] = 0
 
     # ── SHOWDOWN ──
     elif phase == 'showdown':

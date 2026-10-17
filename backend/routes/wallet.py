@@ -26,7 +26,10 @@ async def get_wallet(user=Depends(get_current_user)):
 async def purchase_coins(req: PurchaseRequest, user=Depends(get_current_user)):
     raise HTTPException(
         status_code=410,
-        detail="Direct balance purchases are disabled. Use Stripe checkout.",
+        detail=(
+            "Direct balance purchases are disabled. Production funding requires "
+            "an approved sweepstakes provider and purchased-GC/promotional-SC packaging."
+        ),
     )
 
 

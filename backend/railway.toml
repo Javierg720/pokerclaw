@@ -1,0 +1,46 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Railway — deploys the FastAPI backend from the backend/ directory.
+#
+# Quick start
+# -----------
+# 1. Create a new project at https://railway.app
+# 2. "Deploy from GitHub repo" → select this repo
+# 3. In the service settings set "Root Directory" to: backend
+# 4. Railway detects this file and builds the Dockerfile automatically.
+# 5. Add these environment variables in the Railway service settings:
+#
+#   Required
+#   --------
+#   MONGO_URL          = mongodb+srv://user:pass@cluster.mongodb.net/pokerclaw
+#                        (get this from MongoDB Atlas — free M0 tier works)
+#   DB_NAME            = pokerclaw
+#   JWT_SECRET         = <random 64-char hex>  (openssl rand -hex 32)
+#   ADMIN_SECRET       = <random 64-char hex>  (openssl rand -hex 32)
+#
+#   CORS / deployment
+#   -----------------
+#   ENVIRONMENT        = production
+#   CORS_ORIGINS       = https://your-app.vercel.app
+#                        (use the URL Vercel assigned to your frontend)
+#
+#   Sweepstakes (keep all off until you're ready)
+#   ----------------------------------------------
+#   SWEEPSTAKES_PLAY_ENABLED          = 0
+#   SWEEPSTAKES_FUNDING_ENABLED       = 0
+#   SWEEPSTAKES_REDEMPTION_ENABLED    = 0
+#   SWEEPSTAKES_NO_PURCHASE_ENTRY_ENABLED = 1
+#   DAILY_FREE_GC                     = 1000
+#   DAILY_FREE_SC                     = 1
+#
+# 6. Railway injects PORT automatically — the Dockerfile CMD uses it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/api/sweepstakes/config"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

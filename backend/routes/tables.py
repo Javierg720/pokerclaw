@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends
 import uuid
 from datetime import datetime, timezone
+from pymongo.errors import DuplicateKeyError
 from deps import db, require_agent, sanitize_game_for_response
 from game_engine import create_deck, advance_game
+from bet_settlement import settle_parimutuel_bets
 
 router = APIRouter(prefix="/api")
 
@@ -130,38 +132,37 @@ async def advance_game_endpoint(game_id: str, user=Depends(require_agent)):
             if winner_agent and winner_agent.get('owner_id'):
                 winnings = updated.get('final_pot', 0)
                 sc_credit = max(1, winnings // 10)
+                # Idempotent wallet credit: guard with credited_game_ids set
                 await db.wallets.update_one(
-                    {"user_id": winner_agent['owner_id']},
-                    {"$inc": {"sc_balance": sc_credit}}
+                    {
+                        "user_id": winner_agent['owner_id'],
+                        "credited_game_ids": {"$ne": game_id},
+                    },
+                    {
+                        "$inc": {"sc_balance": sc_credit},
+                        "$addToSet": {"credited_game_ids": game_id},
+                    },
                 )
-                await db.transactions.insert_one({
-                    "id": str(uuid.uuid4()),
+                # Idempotent transaction record: deterministic ID prevents duplicates
+                txn_id = f"game-win:{game_id}"
+                txn_doc = {
+                    "id": txn_id,
                     "user_id": winner_agent['owner_id'],
                     "type": "game_winnings", "amount": sc_credit, "currency": "sc",
                     "description": f"{winner_agent['name']} won {winnings} chips (pot after 20% rake)",
                     "created_at": datetime.now(timezone.utc).isoformat()
-                })
+                }
+                try:
+                    await db.transactions.update_one(
+                        {"id": txn_id}, {"$setOnInsert": txn_doc}, upsert=True
+                    )
+                except DuplicateKeyError:
+                    pass  # already recorded – idempotent
 
-        # Settle side bets
-        bets = await db.bets.find({"game_id": game_id, "status": "pending"}, {"_id": 0}).to_list(1000)
-        total_pool = sum(b['amount'] for b in bets)
-        winning_bets = [b for b in bets if b['agent_id'] == updated.get('winner_id')]
-        total_winning = sum(b['amount'] for b in winning_bets)
-
-        for bet in bets:
-            if bet['agent_id'] == updated.get('winner_id') and total_winning > 0:
-                payout = int((bet['amount'] / total_winning) * total_pool * 0.8)
-                await db.bets.update_one({"id": bet['id']}, {"$set": {"status": "won", "payout": payout}})
-                cf = f"{bet['currency']}_balance"
-                await db.wallets.update_one({"user_id": bet['user_id']}, {"$inc": {cf: payout}})
-                await db.transactions.insert_one({
-                    "id": str(uuid.uuid4()), "user_id": bet['user_id'],
-                    "type": "bet_won", "amount": payout, "currency": bet['currency'],
-                    "description": "Won bet on game",
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                })
-            else:
-                await db.bets.update_one({"id": bet['id']}, {"$set": {"status": "lost", "payout": 0}})
+        await settle_parimutuel_bets(
+            "bets", {"game_id": game_id}, updated.get("winner_id"),
+            "bet_won", "Won bet on game",
+        )
 
         if updated.get('table_id'):
             await db.tables.update_one(

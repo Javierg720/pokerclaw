@@ -1,0 +1,81 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# PokerClaw — Docker Compose
+#
+# Quick start
+# -----------
+#   1. cp backend/.env.example backend/.env
+#   2. Fill in JWT_SECRET and ADMIN_SECRET in backend/.env
+#      (generate with: python -c "import secrets; print(secrets.token_hex(32))")
+#   3. docker compose up --build
+#
+# The app will be available at http://localhost
+# The backend API is at http://localhost/api
+#
+# Production notes
+# ----------------
+#   • Set ENVIRONMENT=production in backend/.env
+#   • Set CORS_ORIGINS=https://yourdomain.com in backend/.env
+#   • Add a TLS-terminating reverse proxy (nginx, Caddy, Traefik) in front
+#   • Replace the MongoDB service with a managed Atlas cluster
+#     and update MONGO_URL in backend/.env accordingly
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── MongoDB ──────────────────────────────────────────────────────────────────
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    # No port exposed externally — only the backend can reach it via the
+    # internal Docker network.
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend (FastAPI) ─────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      # Override MONGO_URL to use the Docker service name
+      MONGO_URL: mongodb://mongodb:27017
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    # Expose only to the internal network; nginx proxies /api to it.
+    expose:
+      - "8001"
+    volumes:
+      # Persist uploaded avatars across container restarts
+      - avatar_uploads:/app/uploads/avatars
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/sweepstakes/config')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Frontend (React + nginx) ──────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Empty = use relative /api path, proxied by nginx to the backend
+        REACT_APP_BACKEND_URL: ""
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  mongo_data:
+  avatar_uploads:

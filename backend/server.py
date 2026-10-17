@@ -1,7 +1,7 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
-from deps import db, client, logger, get_user_from_token
+from deps import db, client, ensure_database_indexes, logger, get_user_from_token
 from game_engine import AGENT_PRESETS, AVATAR_URLS
 import os
 import uuid
@@ -9,7 +9,6 @@ import json
 import asyncio
 import logging
 from datetime import datetime, timezone
-from emergentintegrations.payments.stripe.checkout import StripeCheckout
 
 # ─── Route imports ───
 from routes.auth import router as auth_router
@@ -22,10 +21,13 @@ from routes.crypto import router as crypto_router
 from routes.tournaments import router as tournaments_router
 from routes.leaderboard import router as leaderboard_router
 from routes.agent_api import router as agent_api_router
+from routes.sweepstakes import router as sweepstakes_router
+from routes.admin import router as admin_router
+from sweepstakes import quarantine_legacy_human_sc
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-app = FastAPI()
+app = FastAPI(title="PokerClaw API")
 
 # ─── Serve uploaded avatars as static files ───
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads", "avatars")
@@ -136,50 +138,20 @@ async def websocket_table(websocket: WebSocket, table_id: str):
         await table_manager.broadcast(table_id, {"type": "spectator_count", "count": count})
 
 
-# ─── Stripe Webhook (must be on app, not api_router) ───
-
 @app.post("/api/webhook/stripe")
-async def stripe_webhook(request: Request):
-    payload = await request.body()
-    sig = request.headers.get("Stripe-Signature")
-
-    stripe_key = os.environ.get("STRIPE_API_KEY")
-    if not stripe_key:
-        return {"status": "error", "message": "Stripe not configured"}
-
-    stripe_checkout = StripeCheckout(api_key=stripe_key)
-
-    try:
-        event = await stripe_checkout.handle_webhook(payload, sig)
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return {"status": "error"}
-
-    if event.event_type == "checkout.session.completed" and event.payment_status == "paid":
-        session_id = event.session_id
-        pt = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
-        if pt and pt["payment_status"] != "paid":
-            sc_amount = pt["sc_amount"]
-            await db.wallets.update_one(
-                {"user_id": pt["user_id"]}, {"$inc": {"sc_balance": sc_amount}})
-            await db.payment_transactions.update_one(
-                {"session_id": session_id},
-                {"$set": {"payment_status": "paid", "status": "complete",
-                          "completed_at": datetime.now(timezone.utc).isoformat()}})
-            await db.transactions.insert_one({
-                "id": str(uuid.uuid4()), "user_id": pt["user_id"],
-                "type": "stripe_purchase", "amount": sc_amount, "currency": "sc",
-                "description": f"Purchased {sc_amount} SC via Stripe (${pt['amount_usd']})",
-                "created_at": datetime.now(timezone.utc).isoformat()
-            })
-
-    return {"status": "ok"}
+async def disabled_stripe_webhook():
+    raise HTTPException(
+        status_code=410,
+        detail="Stripe is not a supported funding provider for this sweepstakes product.",
+    )
 
 
 # ─── Startup - Seed Data ───
 
 @app.on_event("startup")
 async def seed_data():
+    await ensure_database_indexes()
+    await quarantine_legacy_human_sc()
     agent_count = await db.agents.count_documents({"is_house": True})
     if agent_count == 0:
         old_count = await db.agents.count_documents({})
@@ -237,10 +209,35 @@ app.include_router(crypto_router)
 app.include_router(tournaments_router)
 app.include_router(leaderboard_router)
 app.include_router(agent_api_router)
+app.include_router(sweepstakes_router)
+app.include_router(admin_router)
+
+# ─── CORS ──────────────────────────────────────────────────────────────────
+# In production (ENVIRONMENT=production) CORS_ORIGINS must be set explicitly.
+# Wildcard origins are rejected in production to prevent credential leakage.
+_environment = os.environ.get("ENVIRONMENT", "development").strip().lower()
+_cors_raw = os.environ.get("CORS_ORIGINS", "").strip()
+
+if not _cors_raw:
+    if _environment == "production":
+        raise SystemExit(
+            "\n\nPokerClaw: CORS_ORIGINS must be set in production.\n"
+            "Example: CORS_ORIGINS=https://pokerclaw.yourdomain.com\n"
+            "Wildcard '*' is not allowed in production.\n"
+        )
+    # Development default — allow the standard CRA dev server and Docker nginx
+    _cors_origins = ["http://localhost:3000", "http://localhost:80", "http://localhost"]
+else:
+    _cors_origins = [o.strip() for o in _cors_raw.split(",") if o.strip()]
+    if "*" in _cors_origins and _environment == "production":
+        raise SystemExit(
+            "\n\nPokerClaw: Wildcard CORS origin ('*') is not allowed in production.\n"
+            "Set CORS_ORIGINS to your actual frontend domain(s).\n"
+        )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

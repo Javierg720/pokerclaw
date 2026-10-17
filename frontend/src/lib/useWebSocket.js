@@ -13,9 +13,9 @@ export function useTableSocket(tableId) {
   const connect = useCallback(() => {
     if (!tableId) return;
 
-    const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
-    const wsUrl = backendUrl.replace('https://', 'wss://').replace('http://', 'ws://');
-    const fullUrl = `${wsUrl}/api/ws/table/${tableId}`;
+    const rawBackend = process.env.REACT_APP_BACKEND_URL || window.location.origin;
+    const wsBase = rawBackend.replace('https://', 'wss://').replace('http://', 'ws://');
+    const fullUrl = `${wsBase}/api/ws/table/${tableId}`;
 
     try {
       const ws = new WebSocket(fullUrl);
