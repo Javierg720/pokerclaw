@@ -12,6 +12,7 @@ export function BettingPanel({ game, onBetPlaced }) {
   const { isHuman } = useAuth();
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [betAmount, setBetAmount] = useState([50]);
+  const [currency, setCurrency] = useState('gc');
   const [placing, setPlacing] = useState(false);
   const [odds, setOdds] = useState(null);
   const [myBets, setMyBets] = useState([]);
@@ -20,7 +21,7 @@ export function BettingPanel({ game, onBetPlaced }) {
     if (!game?.id) return;
     try {
       const [oddsRes, betsRes] = await Promise.all([
-        api.get(`/bets/game/${game.id}/odds`),
+        api.get(`/bets/game/${game.id}/odds?currency=${currency}`),
         api.get('/bets/my-bets'),
       ]);
       setOdds(oddsRes.data);
@@ -28,7 +29,7 @@ export function BettingPanel({ game, onBetPlaced }) {
     } catch {
       // silent
     }
-  }, [game?.id]);
+  }, [game?.id, currency]);
 
   useEffect(() => {
     fetchOdds();
@@ -49,10 +50,10 @@ export function BettingPanel({ game, onBetPlaced }) {
         game_id: game.id,
         agent_id: selectedAgent,
         amount: betAmount[0],
-        currency: 'sc',
+        currency,
       });
       sounds.betPlaced();
-      toast.success(`Bet placed: ${betAmount[0]} SC`);
+      toast.success(`Bet placed: ${betAmount[0]} ${currency.toUpperCase()}`);
       setSelectedAgent(null);
       fetchOdds();
       onBetPlaced?.();
@@ -77,7 +78,7 @@ export function BettingPanel({ game, onBetPlaced }) {
         {odds && odds.total_pool > 0 && (
           <Badge variant="outline" className="text-[9px] border-[#FFE600]/20 text-[#FFE600]" data-testid="bet-pool-badge">
             <Users size={8} className="mr-1" />
-            {odds.total_bets} bets / {odds.total_pool} SC pool
+            {odds.total_bets} bets / {odds.total_pool} {currency.toUpperCase()} pool
           </Badge>
         )}
       </div>
@@ -110,7 +111,7 @@ export function BettingPanel({ game, onBetPlaced }) {
                   <div>
                     <span className="text-xs font-bold text-white block">{player.agent_name}</span>
                     {myBet && (
-                      <span className="text-[8px] text-[#00F0FF]/60 mono">You bet {myBet.amount} SC</span>
+                      <span className="text-[8px] text-[#00F0FF]/60 mono">You bet {myBet.amount} {myBet.currency?.toUpperCase()}</span>
                     )}
                   </div>
                 </div>
@@ -140,10 +141,26 @@ export function BettingPanel({ game, onBetPlaced }) {
 
       {/* Amount Slider */}
       <div>
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          <button
+            type="button"
+            onClick={() => setCurrency('gc')}
+            className={`rounded-lg py-2 text-[10px] font-bold border ${currency === 'gc' ? 'border-[#FFE600]/50 bg-[#FFE600]/10 text-[#FFE600]' : 'border-white/5 text-white/30'}`}
+          >
+            GOLD COINS
+          </button>
+          <button
+            type="button"
+            onClick={() => setCurrency('sc')}
+            className={`rounded-lg py-2 text-[10px] font-bold border ${currency === 'sc' ? 'border-[#00F0FF]/50 bg-[#00F0FF]/10 text-[#00F0FF]' : 'border-white/5 text-white/30'}`}
+          >
+            SWEEPSTAKES COINS
+          </button>
+        </div>
         <div className="flex justify-between text-xs mb-2">
           <span className="text-white/40">Bet Amount</span>
-          <span className="font-bold mono text-[#00F0FF]">
-            {betAmount[0]} SC
+          <span className={`font-bold mono ${currency === 'gc' ? 'text-[#FFE600]' : 'text-[#00F0FF]'}`}>
+            {betAmount[0]} {currency.toUpperCase()}
           </span>
         </div>
         <Slider
@@ -156,8 +173,8 @@ export function BettingPanel({ game, onBetPlaced }) {
           data-testid="bet-slider"
         />
         <div className="flex justify-between text-[9px] text-white/15 mt-1 mono">
-          <span>10 SC</span>
-          <span>1,000 SC</span>
+          <span>10 {currency.toUpperCase()}</span>
+          <span>1,000 {currency.toUpperCase()}</span>
         </div>
       </div>
 
@@ -166,7 +183,7 @@ export function BettingPanel({ game, onBetPlaced }) {
         <div className="flex items-center justify-center gap-2 py-1.5 rounded-lg bg-[#FFE600]/5 border border-[#FFE600]/10" data-testid="potential-win">
           <Trophy size={12} className="text-[#FFE600]" />
           <span className="text-xs text-white/50">Win</span>
-          <span className="text-sm font-black text-[#FFE600] mono">{potentialWin} SC</span>
+          <span className="text-sm font-black text-[#FFE600] mono">{potentialWin} {currency.toUpperCase()}</span>
           <span className="text-[9px] text-white/20">({selectedOdds?.multiplier}x)</span>
         </div>
       )}
@@ -178,7 +195,7 @@ export function BettingPanel({ game, onBetPlaced }) {
         className="w-full bg-[#FF003C] hover:bg-[#cc0030] text-white font-bold rounded-xl disabled:opacity-40"
       >
         <Zap size={14} className="mr-1.5" />
-        {placing ? 'Placing...' : selectedAgent ? `BET ${betAmount[0]} SC` : 'SELECT AN AGENT'}
+        {placing ? 'Placing...' : selectedAgent ? `BET ${betAmount[0]} ${currency.toUpperCase()}` : 'SELECT AN AGENT'}
       </Button>
 
       {/* My Bets on this game */}
@@ -192,7 +209,7 @@ export function BettingPanel({ game, onBetPlaced }) {
                 <div key={b.id} className="flex items-center justify-between text-[10px]" data-testid={`my-bet-${b.id}`}>
                   <span className="text-white/50">{agent?.agent_name || 'Agent'}</span>
                   <div className="flex items-center gap-2">
-                    <span className="text-[#00F0FF] mono font-bold">{b.amount} SC</span>
+                    <span className="text-[#00F0FF] mono font-bold">{b.amount} {b.currency?.toUpperCase()}</span>
                     <Badge
                       variant="outline"
                       className={`text-[7px] ${

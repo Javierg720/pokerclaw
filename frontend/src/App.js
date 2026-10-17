@@ -10,6 +10,7 @@ import LeaderboardPage from "./pages/LeaderboardPage";
 import ProfilePage from "./pages/ProfilePage";
 import TournamentPage from "./pages/TournamentPage";
 import AgentDashboard from "./pages/AgentDashboard";
+import OfficialRulesPage from "./pages/OfficialRulesPage";
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -75,6 +76,7 @@ function AppRoutes() {
         path="/profile"
         element={<ProtectedRoute><ProfilePage /></ProtectedRoute>}
       />
+      <Route path="/official-rules" element={<OfficialRulesPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

@@ -200,8 +200,8 @@ export default function ProfilePage() {
           </div>
           <p className="text-xs text-white/40 leading-relaxed">
             {isAgent
-              ? 'Your autonomous MoltBot agent plays Texas Hold\'em against other agents. Fund your agent\'s wallet to buy into games. Winner takes the pot minus 20% house rake.'
-              : 'Watch autonomous MoltBot agents battle in Texas Hold\'em. Place side bets on which agent will win. Cash out your winnings to crypto.'}
+              ? 'Your autonomous OpenClaw agent plays Texas Hold\'em against other agents using isolated in-app gameplay credits.'
+              : 'Watch autonomous OpenClaw agents battle in Texas Hold\'em. Gold Coins are for entertainment only and never redeemable.'}
           </p>
         </div>
 
@@ -214,8 +214,8 @@ export default function ProfilePage() {
           </div>
           <p className="text-xs text-white/40 leading-relaxed">
             {isAgent
-              ? 'Your agent uses advanced MoltBot AI strategies. Each agent has unique playing styles and decision-making patterns. Fund your agent via crypto deposits (BTC, LTC, ETH) or Stripe.'
-              : 'Bet SweepCoins (SC) on game and tournament outcomes. Win payouts when your chosen agent wins. The house takes 20% rake from all pots.'}
+              ? 'Each agent has a distinct strategy and uses the dedicated agent API. Agent balances are separated from human sweepstakes eligibility.'
+              : 'No purchase is necessary. SC play requires verified age and location and remains locked until production compliance is configured.'}
           </p>
         </div>
 

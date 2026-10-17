@@ -1,56 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
 import { Navigation } from '../components/Navigation';
-import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { Bot, Zap, Trophy, Copy, Check, TrendingUp, Wallet, Crown, X, Clock, RefreshCw, Coins } from 'lucide-react';
+import { Bot, Zap, Trophy, TrendingUp, Wallet, Crown, X, Clock, RefreshCw, Coins } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from 'sonner';
-
-const CRYPTO_ICONS = {
-  btc: { label: 'Bitcoin', color: '#F7931A' },
-  ltc: { label: 'Litecoin', color: '#BFBBBB' },
-  eth: { label: 'Ethereum', color: '#627EEA' },
-};
-
-function CryptoAddress({ type, address }) {
-  const [copied, setCopied] = useState(false);
-  const info = CRYPTO_ICONS[type];
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(address);
-    setCopied(true);
-    toast.success(`${info.label} address copied!`);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <div className="glass rounded-xl p-3 space-y-1.5" data-testid={`crypto-address-${type}`}>
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-bold uppercase tracking-wider" style={{ color: info.color }}>
-          {info.label}
-        </span>
-        <Badge variant="outline" className="text-[8px] border-white/10 text-white/30">
-          2 CONFIRMATIONS
-        </Badge>
-      </div>
-      <div className="flex items-center gap-2">
-        <code className="text-[10px] text-white/50 mono flex-1 truncate bg-white/[0.02] rounded px-2 py-1.5">
-          {address}
-        </code>
-        <button
-          onClick={handleCopy}
-          data-testid={`copy-${type}-btn`}
-          className="text-white/40 hover:text-white transition-colors p-1"
-        >
-          {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
-        </button>
-      </div>
-      <p className="text-[9px] text-white/20">100 SC per $1 USD value deposited</p>
-    </div>
-  );
-}
 
 function ActivityItem({ item }) {
   const isWin = item.result === 'win';
@@ -136,7 +90,6 @@ function getTimeAgo(dateStr) {
 
 export default function AgentDashboard() {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const [agentData, setAgentData] = useState(null);
   const [activity, setActivity] = useState([]);
   const [earnings, setEarnings] = useState([]);
@@ -304,32 +257,16 @@ export default function AgentDashboard() {
             </div>
           )}
 
-          {/* Crypto Deposit Addresses */}
+          {/* Funding status */}
           <div>
             <h3 className="text-xs font-bold text-white/60 uppercase tracking-widest mb-3 px-1">
-              Fund Agent Wallet
+              Agent Wallet
             </h3>
-            {wallet?.crypto_addresses ? (
-              <div className="space-y-2">
-                {Object.entries(wallet.crypto_addresses).map(([type, address]) => (
-                  <CryptoAddress key={type} type={type} address={address} />
-                ))}
-              </div>
-            ) : (
-              <div className="glass rounded-xl p-4 text-center">
-                <p className="text-white/30 text-sm">No deposit addresses available</p>
-              </div>
-            )}
+            <div className="glass rounded-xl p-4 text-center">
+              <p className="text-white/40 text-sm">External funding is disabled.</p>
+              <p className="text-white/20 text-[10px] mt-1">Agent credits are isolated from human sweepstakes wallets.</p>
+            </div>
           </div>
-
-          {/* Buy SC button */}
-          <Button
-            onClick={() => navigate('/wallet')}
-            data-testid="buy-sc-stripe-btn"
-            className="w-full bg-gradient-to-r from-[#00F0FF] to-[#BD00FF] text-black font-bold rounded-xl py-3"
-          >
-            BUY SWEEPCOINS
-          </Button>
         </div>
       ) : (
         <div className="px-4 text-center py-16">

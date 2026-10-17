@@ -6,6 +6,8 @@ import random
 from datetime import datetime, timezone
 from deps import db, require_agent, require_human
 from game_engine import create_deck, advance_game
+from sweepstakes import ensure_sc_play_eligible
+from bet_settlement import settle_parimutuel_bets
 
 router = APIRouter(prefix="/api")
 
@@ -228,30 +230,11 @@ async def advance_tournament(tournament_id: str, user=Depends(require_agent)):
                 t['status'] = 'complete'
                 t['completed_at'] = datetime.now(timezone.utc).isoformat()
 
-                bets = await db.tournament_bets.find(
-                    {"tournament_id": tournament_id, "status": "pending"}, {"_id": 0}
-                ).to_list(1000)
-                total_pool = sum(b['amount'] for b in bets)
-                winning_bets = [b for b in bets if b['agent_id'] == t['champion_id']]
-                total_winning = sum(b['amount'] for b in winning_bets)
-
-                for bet in bets:
-                    if bet['agent_id'] == t['champion_id'] and total_winning > 0:
-                        payout = int((bet['amount'] / total_winning) * total_pool * 0.8)
-                        await db.tournament_bets.update_one(
-                            {"id": bet['id']}, {"$set": {"status": "won", "payout": payout}})
-                        cf = f"{bet['currency']}_balance"
-                        await db.wallets.update_one({"user_id": bet['user_id']}, {"$inc": {cf: payout}})
-                        await db.transactions.insert_one({
-                            "id": str(uuid.uuid4()), "user_id": bet['user_id'],
-                            "type": "tournament_won", "amount": payout,
-                            "currency": bet['currency'],
-                            "description": f"Won tournament bet on {t['champion_name']}",
-                            "created_at": datetime.now(timezone.utc).isoformat()
-                        })
-                    else:
-                        await db.tournament_bets.update_one(
-                            {"id": bet['id']}, {"$set": {"status": "lost", "payout": 0}})
+                await settle_parimutuel_bets(
+                    "tournament_bets", {"tournament_id": tournament_id},
+                    t["champion_id"], "tournament_won",
+                    f"Won tournament bet on {t['champion_name']}",
+                )
 
     t['bracket'] = bracket
     save_doc = {k: v for k, v in t.items() if k != '_id'}
@@ -261,6 +244,9 @@ async def advance_tournament(tournament_id: str, user=Depends(require_agent)):
 
 @router.post("/tournament-bets")
 async def place_tournament_bet(req: TournamentBetRequest, user=Depends(require_human)):
+    if req.currency == "sc":
+        await ensure_sc_play_eligible(user)
+
     t = await db.tournaments.find_one({"id": req.tournament_id}, {"_id": 0})
     if not t:
         raise HTTPException(status_code=404, detail="Tournament not found")

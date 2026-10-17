@@ -153,7 +153,10 @@ async def crypto_prices():
 async def submit_crypto_deposit(req: CryptoDepositRequest, user=Depends(get_current_user)):
     raise HTTPException(
         status_code=410,
-        detail="Crypto deposits are disabled until custody-address verification is configured. Use Stripe checkout.",
+        detail=(
+            "Crypto deposits are disabled. Production funding requires an approved "
+            "sweepstakes provider and verified custody controls."
+        ),
     )
 
 

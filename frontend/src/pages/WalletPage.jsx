@@ -1,199 +1,48 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { useSearchParams } from 'react-router-dom';
-import { Navigation } from '../components/Navigation';
-import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Badge } from '../components/ui/badge';
+import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  Wallet as WalletIcon, ArrowUpRight, ArrowDownLeft, Coins, Zap,
-  CreditCard, Copy, Check, Loader2, TrendingUp, TrendingDown, Clock
+  AlertTriangle, ArrowDownLeft, ArrowUpRight, Coins, Gift,
+  LockKeyhole, Shield, Wallet as WalletIcon, Zap,
 } from 'lucide-react';
-import api from '../lib/api';
 import { toast } from 'sonner';
 
-const CRYPTO_META = {
-  btc: { label: 'Bitcoin', color: '#F7931A', symbol: 'BTC' },
-  ltc: { label: 'Litecoin', color: '#BFBBBB', symbol: 'LTC' },
-  eth: { label: 'Ethereum', color: '#627EEA', symbol: 'ETH' },
-};
+import { Navigation } from '../components/Navigation';
+import { Button } from '../components/ui/button';
+import { useAuth } from '../context/AuthContext';
+import api from '../lib/api';
 
-function CryptoDepositCard({ type, address, price, onDeposit }) {
-  const [copied, setCopied] = useState(false);
-  const [showForm, setShowForm] = useState(false);
-  const [txHash, setTxHash] = useState('');
-  const [amount, setAmount] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const info = CRYPTO_META[type];
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(address);
-    setCopied(true);
-    toast.success(`${info.label} address copied!`);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleSubmit = async () => {
-    if (!txHash.trim() || !amount || parseFloat(amount) <= 0) {
-      toast.error('Enter a valid TX hash and amount');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await onDeposit(type, txHash.trim(), parseFloat(amount));
-      setTxHash('');
-      setAmount('');
-      setShowForm(false);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const scPreview = price && amount ? Math.floor(parseFloat(amount) * price * 100) : 0;
-
+function BalanceCard({ icon: Icon, label, value, color, note, testId }) {
   return (
-    <div className="glass rounded-xl p-3 space-y-2" data-testid={`wallet-crypto-${type}`}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: `${info.color}20` }}>
-            <span className="text-[10px] font-black" style={{ color: info.color }}>{info.symbol}</span>
-          </div>
-          <div>
-            <span className="text-xs font-bold text-white">{info.label}</span>
-            {price > 0 && (
-              <span className="text-[10px] text-white/30 ml-2 mono">${price.toLocaleString()}</span>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <button onClick={handleCopy} className="text-white/30 hover:text-white transition-colors p-1" data-testid={`copy-${type}-btn`}>
-            {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
-          </button>
-          <button
-            onClick={() => setShowForm(!showForm)}
-            data-testid={`deposit-${type}-toggle`}
-            className={`text-[9px] font-bold px-2 py-1 rounded-md transition-all ${
-              showForm ? 'bg-white/10 text-white' : 'bg-white/[0.03] text-white/30 hover:text-white/60'
-            }`}
-          >
-            DEPOSIT
-          </button>
-        </div>
+    <div className="glass rounded-2xl p-4 border border-white/5" data-testid={testId}>
+      <div className="flex items-center gap-2 mb-2">
+        <Icon size={16} style={{ color }} />
+        <span className="text-[10px] text-white/40 uppercase tracking-widest">{label}</span>
       </div>
-
-      <code className="text-[9px] text-white/30 mono block truncate bg-white/[0.02] rounded px-2 py-1.5">
-        {address}
-      </code>
-
-      {showForm && (
-        <div className="space-y-2 pt-1 border-t border-white/[0.05]">
-          <Input
-            placeholder="Transaction hash"
-            value={txHash}
-            onChange={(e) => setTxHash(e.target.value)}
-            data-testid={`deposit-${type}-txhash`}
-            className="bg-white/[0.03] border-white/10 text-white text-xs placeholder:text-white/15 h-8"
-          />
-          <div className="flex gap-2">
-            <Input
-              type="number"
-              step="any"
-              placeholder={`Amount in ${info.symbol}`}
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              data-testid={`deposit-${type}-amount`}
-              className="bg-white/[0.03] border-white/10 text-white text-xs placeholder:text-white/15 h-8 flex-1"
-            />
-            <Button
-              onClick={handleSubmit}
-              disabled={submitting}
-              data-testid={`deposit-${type}-submit`}
-              className="bg-white/10 hover:bg-white/20 text-white text-xs h-8 px-3"
-            >
-              {submitting ? <Loader2 size={12} className="animate-spin" /> : 'SUBMIT'}
-            </Button>
-          </div>
-          {scPreview > 0 && (
-            <p className="text-[10px] text-[#00F0FF]/60 mono">
-              = ~{scPreview.toLocaleString()} SC
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DepositStatus({ deposit, onConfirm }) {
-  const info = CRYPTO_META[deposit.crypto_type];
-  const isPending = deposit.status === 'pending';
-
-  return (
-    <div className={`glass rounded-lg p-3 flex items-center justify-between border-l-2 ${
-      isPending ? 'border-l-[#FFE600]/50' : 'border-l-green-500/50'
-    }`} data-testid={`deposit-status-${deposit.id}`}>
-      <div className="flex items-center gap-2.5">
-        <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: `${info.color}20` }}>
-          <span className="text-[9px] font-black" style={{ color: info.color }}>{info.symbol}</span>
-        </div>
-        <div>
-          <p className="text-xs text-white font-medium">
-            {deposit.amount_crypto} {info.symbol}
-            <span className="text-white/30 ml-1">(${deposit.usd_value})</span>
-          </p>
-          <p className="text-[9px] text-white/20 mono flex items-center gap-1">
-            <Clock size={8} />
-            {deposit.confirmations}/{deposit.required_confirmations} confirmations
-          </p>
-        </div>
+      <div className="text-2xl font-black mono" style={{ color }}>
+        {(value || 0).toLocaleString()}
       </div>
-      <div className="text-right flex items-center gap-2">
-        <span className="text-xs font-bold text-[#00F0FF] mono">{deposit.sc_amount.toLocaleString()} SC</span>
-        {isPending && (
-          <button
-            onClick={() => onConfirm(deposit.id)}
-            data-testid={`confirm-deposit-${deposit.id}`}
-            className="text-[8px] font-bold px-2 py-1 rounded bg-[#FFE600]/10 text-[#FFE600] hover:bg-[#FFE600]/20 transition-all"
-          >
-            +1 CONF
-          </button>
-        )}
-        {!isPending && (
-          <Badge variant="outline" className="text-[8px] border-green-500/30 text-green-400">CREDITED</Badge>
-        )}
-      </div>
+      <p className="text-[9px] text-white/30 mt-2 leading-relaxed">{note}</p>
     </div>
   );
 }
 
 export default function WalletPage() {
   const { isAgent } = useAuth();
-  const [searchParams, setSearchParams] = useSearchParams();
   const [wallet, setWallet] = useState(null);
   const [transactions, setTransactions] = useState([]);
-  const [packages, setPackages] = useState([]);
-  const [cryptoPrices, setCryptoPrices] = useState({});
-  const [deposits, setDeposits] = useState([]);
+  const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [checkoutLoading, setCheckoutLoading] = useState(null);
-  const [pollingStatus, setPollingStatus] = useState(null);
+  const [claiming, setClaiming] = useState(false);
+  const [excluding, setExcluding] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
-      const requests = [
-        api.get('/wallet'),
-        api.get('/wallet/transactions'),
-        api.get('/stripe/packages'),
-        api.get('/crypto/prices'),
-      ];
-      if (isAgent) requests.push(api.get('/crypto/deposits'));
-
+      const requests = [api.get('/wallet'), api.get('/wallet/transactions')];
+      if (!isAgent) requests.push(api.get('/sweepstakes/status'));
       const results = await Promise.all(requests);
       setWallet(results[0].data);
-      setTransactions(results[1].data);
-      setPackages(results[2].data);
-      setCryptoPrices(results[3].data.prices || {});
-      if (isAgent && results[4]) setDeposits(results[4].data || []);
+      setTransactions(results[1].data || []);
+      if (!isAgent) setStatus(results[2].data);
     } catch {
       toast.error('Failed to load wallet');
     } finally {
@@ -201,81 +50,37 @@ export default function WalletPage() {
     }
   }, [isAgent]);
 
-  const pollPaymentStatus = useCallback(async (sessionId, attempts = 0) => {
-    if (attempts >= 8) {
-      setPollingStatus(null);
-      toast.error('Payment status check timed out. Please refresh.');
-      return;
-    }
-    setPollingStatus('checking');
-    try {
-      const res = await api.get(`/stripe/status/${sessionId}`);
-      if (res.data.payment_status === 'paid') {
-        setPollingStatus('paid');
-        toast.success(`+${res.data.sc_amount} SweepCoins added!`);
-        fetchData();
-        setSearchParams({});
-        setTimeout(() => setPollingStatus(null), 3000);
-        return;
-      }
-      setTimeout(() => pollPaymentStatus(sessionId, attempts + 1), 2000);
-    } catch {
-      setTimeout(() => pollPaymentStatus(sessionId, attempts + 1), 2000);
-    }
-  }, [setSearchParams, fetchData]);
-
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  useEffect(() => {
-    const sessionId = searchParams.get('session_id');
-    const status = searchParams.get('status');
-    if (sessionId && status === 'success') {
-      pollPaymentStatus(sessionId);
-    } else if (status === 'cancelled') {
-      toast.info('Payment cancelled');
-      setSearchParams({});
-    }
-  }, [searchParams, pollPaymentStatus, setSearchParams]);
-
-  const handleStripeCheckout = async (packageId) => {
-    setCheckoutLoading(packageId);
+  const claimDailyCoins = async () => {
+    setClaiming(true);
     try {
-      const res = await api.post('/stripe/checkout', {
-        package_id: packageId,
-        origin_url: window.location.origin,
-      });
-      window.location.href = res.data.url;
+      const { data } = await api.post('/sweepstakes/daily-claim');
+      const credits = [`${data.gc_credited.toLocaleString()} GC`];
+      if (data.sc_credited) credits.push(`${data.sc_credited.toLocaleString()} SC`);
+      toast.success(`Daily free coins claimed: ${credits.join(' + ')}`);
+      await fetchData();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Checkout failed');
-      setCheckoutLoading(null);
+      toast.error(err.response?.data?.detail || 'Daily coins are not available yet');
+    } finally {
+      setClaiming(false);
     }
   };
 
-  const handleCryptoDeposit = async (cryptoType, txHash, amountCrypto) => {
+  const selfExclude = async () => {
+    const confirmed = window.confirm(
+      'Permanently self-exclude this account from Sweepstakes Coin play? This cannot be reversed in the app.'
+    );
+    if (!confirmed) return;
+    setExcluding(true);
     try {
-      const res = await api.post('/crypto/deposit', {
-        crypto_type: cryptoType,
-        tx_hash: txHash,
-        amount_crypto: amountCrypto,
-      });
-      toast.success(res.data.message);
-      fetchData();
+      await api.post('/sweepstakes/self-exclude', { days: null });
+      toast.success('Self-exclusion is active');
+      await fetchData();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Deposit failed');
-    }
-  };
-
-  const handleConfirmDeposit = async (depositId) => {
-    try {
-      const res = await api.post(`/crypto/deposits/${depositId}/confirm`);
-      if (res.data.status === 'confirmed') {
-        toast.success(`+${res.data.sc_credited.toLocaleString()} SC credited!`);
-      } else {
-        toast.info(`Confirmation ${res.data.confirmations}/${res.data.required} received`);
-      }
-      fetchData();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'Confirmation failed');
+      toast.error(err.response?.data?.detail || 'Unable to apply self-exclusion');
+    } finally {
+      setExcluding(false);
     }
   };
 
@@ -288,184 +93,147 @@ export default function WalletPage() {
     );
   }
 
-  const pendingDeposits = deposits.filter(d => d.status === 'pending');
-  const confirmedDeposits = deposits.filter(d => d.status === 'confirmed');
+  const config = status?.config;
+  const eligibility = status?.eligibility;
 
   return (
     <div className="main-content" data-testid="wallet-page">
       <div className="px-4 pt-6 pb-4">
         <h1 className="text-xl font-black text-white tracking-tight flex items-center gap-2">
           <WalletIcon size={20} className="text-[#FF003C]" />
-          WALLET
+          {isAgent ? 'AGENT BANK' : 'SOCIAL WALLET'}
         </h1>
       </div>
 
-      {/* Payment Status Banner */}
-      {pollingStatus && (
-        <div className={`mx-4 mb-4 rounded-xl p-3 text-center text-sm font-bold ${
-          pollingStatus === 'paid' ? 'bg-green-500/20 text-green-400' : 'bg-[#00F0FF]/10 text-[#00F0FF]'
-        }`} data-testid="payment-status-banner">
-          {pollingStatus === 'paid' ? 'Payment successful! SweepCoins credited.' : (
-            <span className="flex items-center justify-center gap-2">
-              <Loader2 size={14} className="animate-spin" /> Verifying payment...
-            </span>
-          )}
-        </div>
-      )}
+      <div className="px-4 grid grid-cols-2 gap-3 mb-5">
+        <BalanceCard
+          icon={Coins}
+          label={isAgent ? 'Agent Chips' : 'Gold Coins'}
+          value={wallet?.gc_balance}
+          color="#FFE600"
+          note={isAgent ? 'Agent gameplay credits.' : 'Entertainment only. Never redeemable for cash or prizes.'}
+          testId="gc-balance-card"
+        />
+        <BalanceCard
+          icon={Zap}
+          label={isAgent ? 'Agent SC' : 'Sweepstakes Coins'}
+          value={wallet?.sc_balance}
+          color="#00F0FF"
+          note={isAgent ? 'Internal agent gameplay credits.' : 'Promotional play only. Eligibility is required before SC play.'}
+          testId="sc-balance-card"
+        />
+      </div>
 
-      {/* Balances */}
-      <div className="px-4 grid grid-cols-2 gap-3 mb-6">
-        {!isAgent && (
-          <div className="glass rounded-2xl p-4 glow-gold" data-testid="gc-balance-card">
-            <div className="flex items-center gap-2 mb-2">
-              <Coins size={16} className="text-[#FFE600]" />
-              <span className="text-[10px] text-white/40 uppercase tracking-widest">Gold Coins</span>
+      {!isAgent && (
+        <div className="px-4 space-y-3 mb-6">
+          <div className="glass rounded-2xl p-4 border border-[#FFE600]/20">
+            <div className="flex gap-3">
+              <Gift size={20} className="text-[#FFE600] shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <h2 className="text-sm font-bold text-white">Free daily coins</h2>
+                <p className="text-[11px] text-white/40 mt-1 leading-relaxed">
+                  No purchase is necessary. Claim {config?.daily_gc_amount?.toLocaleString() || 0} free GC daily.
+                  Eligible players also receive {config?.daily_sc_amount?.toLocaleString() || 0} promotional SC.
+                </p>
+                <Button
+                  onClick={claimDailyCoins}
+                  disabled={claiming}
+                  data-testid="daily-free-claim"
+                  className="mt-3 bg-[#FFE600] hover:bg-[#e5cf00] text-black font-black text-xs"
+                >
+                  {claiming ? 'CLAIMING...' : 'CLAIM FREE COINS'}
+                </Button>
+              </div>
             </div>
-            <div className="text-2xl font-black text-[#FFE600] mono">{wallet?.gc_balance?.toLocaleString() || 0}</div>
           </div>
-        )}
-        <div className={`glass rounded-2xl p-4 glow-cyan ${isAgent ? 'col-span-2' : ''}`} data-testid="sc-balance-card">
-          <div className="flex items-center gap-2 mb-2">
-            <Zap size={16} className="text-[#00F0FF]" />
-            <span className="text-[10px] text-white/40 uppercase tracking-widest">
-              {isAgent ? 'Agent SweepCoins' : 'Sweep Coins'}
-            </span>
-          </div>
-          <div className="text-2xl font-black text-[#00F0FF] mono">{wallet?.sc_balance?.toLocaleString() || 0}</div>
-        </div>
-      </div>
 
-      {/* Live Crypto Prices */}
-      {isAgent && Object.keys(cryptoPrices).length > 0 && (
-        <div className="px-4 mb-4">
-          <div className="flex gap-2">
-            {Object.entries(cryptoPrices).map(([key, p]) => {
-              const info = CRYPTO_META[key];
-              const isUp = (p.change_24h || 0) >= 0;
-              return (
-                <div key={key} className="glass rounded-lg p-2 flex-1 text-center" data-testid={`price-${key}`}>
-                  <span className="text-[9px] font-bold" style={{ color: info.color }}>{info.symbol}</span>
-                  <div className="text-xs font-bold text-white mono">${p.usd?.toLocaleString()}</div>
-                  <div className={`text-[8px] flex items-center justify-center gap-0.5 ${isUp ? 'text-green-400' : 'text-red-400'}`}>
-                    {isUp ? <TrendingUp size={8} /> : <TrendingDown size={8} />}
-                    {Math.abs(p.change_24h || 0).toFixed(1)}%
-                  </div>
-                </div>
-              );
-            })}
+          <div className="glass rounded-2xl p-4 border border-white/5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Shield size={17} className="text-[#00F0FF]" />
+                <h2 className="text-sm font-bold text-white">Sweepstakes access</h2>
+              </div>
+              <span className={`text-[9px] font-bold px-2 py-1 rounded-full ${
+                config?.sc_play_enabled && eligibility?.eligible
+                  ? 'bg-green-500/10 text-green-400'
+                  : 'bg-[#FF003C]/10 text-[#FF6B88]'
+              }`}>
+                {config?.sc_play_enabled && eligibility?.eligible ? 'ELIGIBLE' : 'LOCKED'}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="bg-white/[0.03] rounded-lg p-2">
+                <div className="text-[9px] text-white/30">AGE</div>
+                <div className="text-[10px] font-bold text-white/70 mt-1">{eligibility?.age_verified ? 'VERIFIED' : 'REQUIRED'}</div>
+              </div>
+              <div className="bg-white/[0.03] rounded-lg p-2">
+                <div className="text-[9px] text-white/30">REGION</div>
+                <div className="text-[10px] font-bold text-white/70 mt-1">{eligibility?.jurisdiction_allowed ? 'ALLOWED' : 'REQUIRED'}</div>
+              </div>
+              <div className="bg-white/[0.03] rounded-lg p-2">
+                <div className="text-[9px] text-white/30">PLAY</div>
+                <div className="text-[10px] font-bold text-white/70 mt-1">{config?.sc_play_enabled ? 'ON' : 'OFF'}</div>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
 
-      {/* Crypto Deposit (Agent only) */}
-      {isAgent && wallet?.crypto_addresses && (
-        <div className="px-4 mb-6">
-          <h3 className="text-xs font-bold text-white/60 uppercase tracking-widest mb-3">
-            Deposit Crypto
-          </h3>
-          <div className="space-y-2">
-            {Object.entries(wallet.crypto_addresses).map(([type, address]) => (
-              <CryptoDepositCard
-                key={type}
-                type={type}
-                address={address}
-                price={cryptoPrices[type]?.usd || 0}
-                onDeposit={handleCryptoDeposit}
-              />
-            ))}
+          <div className="glass rounded-2xl p-4 border border-[#FF003C]/20">
+            <div className="flex gap-3">
+              <LockKeyhole size={19} className="text-[#FF6B88] shrink-0" />
+              <div>
+                <h2 className="text-sm font-bold text-white">Funding and redemption locked</h2>
+                <p className="text-[11px] text-white/40 mt-1 leading-relaxed">
+                  Card, crypto, and cashout flows are disabled until an approved provider,
+                  identity checks, geolocation, and jurisdiction-specific rules are configured.
+                </p>
+              </div>
+            </div>
           </div>
-          <p className="text-[9px] text-white/20 text-center mt-2">100 SC per $1 USD value. Credits after 2 confirmations.</p>
-        </div>
-      )}
 
-      {/* Pending Deposits */}
-      {isAgent && pendingDeposits.length > 0 && (
-        <div className="px-4 mb-6">
-          <h3 className="text-xs font-bold text-[#FFE600]/60 uppercase tracking-widest mb-3">
-            Pending Deposits ({pendingDeposits.length})
-          </h3>
-          <div className="space-y-2">
-            {pendingDeposits.map(d => (
-              <DepositStatus key={d.id} deposit={d} onConfirm={handleConfirmDeposit} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Confirmed Deposits */}
-      {isAgent && confirmedDeposits.length > 0 && (
-        <div className="px-4 mb-6">
-          <h3 className="text-xs font-bold text-green-400/60 uppercase tracking-widest mb-3">
-            Confirmed Deposits
-          </h3>
-          <div className="space-y-2">
-            {confirmedDeposits.slice(0, 5).map(d => (
-              <DepositStatus key={d.id} deposit={d} onConfirm={handleConfirmDeposit} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Stripe SC Packages */}
-      <div className="px-4 mb-6">
-        <h3 className="text-xs font-bold text-white/60 uppercase tracking-widest mb-3">Buy SweepCoins</h3>
-        <div className="grid grid-cols-2 gap-2">
-          {packages.map((pkg) => (
+          <div className="flex items-center justify-between px-1 text-[10px]">
+            <Link to="/official-rules" className="text-[#00F0FF] hover:underline">Official Rules & eligibility</Link>
             <button
-              key={pkg.id}
-              onClick={() => handleStripeCheckout(pkg.id)}
-              disabled={checkoutLoading === pkg.id}
-              data-testid={`stripe-pkg-${pkg.id}`}
-              className="glass rounded-xl p-4 text-left transition-all hover:border-[#FF003C]/30 border border-white/5 disabled:opacity-50"
+              onClick={selfExclude}
+              disabled={excluding || eligibility?.self_excluded}
+              className="text-white/35 hover:text-[#FF6B88] disabled:opacity-50"
+              data-testid="self-exclude-button"
             >
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <Zap size={14} className="text-[#00F0FF]" />
-                <span className="text-base font-black text-[#00F0FF]">{pkg.sc_amount.toLocaleString()} SC</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-white/40 font-semibold">${pkg.price_usd}</span>
-                <div className="flex items-center gap-1 text-[9px] text-white/20">
-                  <CreditCard size={10} />
-                  {checkoutLoading === pkg.id ? <Loader2 size={10} className="animate-spin" /> : 'CARD'}
-                </div>
-              </div>
+              {eligibility?.self_excluded ? 'Self-exclusion active' : 'Self-exclude'}
             </button>
-          ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="px-4 mb-6">
-        <div className="glass rounded-xl p-3 text-center text-[10px] text-white/30">
-          PokerClaw credits are currently for in-app play only. Cashout is disabled.
+      {isAgent && (
+        <div className="px-4 mb-6">
+          <div className="glass rounded-xl p-4 text-[11px] text-white/40 leading-relaxed flex gap-3">
+            <AlertTriangle size={18} className="text-[#FFE600] shrink-0" />
+            Agent balances are isolated from human sweepstakes eligibility and cannot be funded or redeemed through this build.
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Transactions */}
       <div className="px-4 mb-6">
         <h3 className="text-xs font-bold text-white/60 uppercase tracking-widest mb-3">Transaction History</h3>
         <div className="space-y-2">
           {transactions.length === 0 ? (
             <p className="text-white/20 text-sm text-center py-4">No transactions yet</p>
-          ) : (
-            transactions.slice(0, 20).map((txn) => (
-              <div key={txn.id} className="glass rounded-lg p-3 flex items-center justify-between" data-testid={`txn-${txn.id}`}>
-                <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                    txn.amount > 0 ? 'bg-green-500/10' : 'bg-red-500/10'
-                  }`}>
-                    {txn.amount > 0 ? <ArrowDownLeft size={14} className="text-green-400" /> : <ArrowUpRight size={14} className="text-red-400" />}
-                  </div>
-                  <div>
-                    <p className="text-xs text-white font-medium">{txn.description}</p>
-                    <p className="text-[10px] text-white/30 mono">{new Date(txn.created_at).toLocaleDateString()}</p>
-                  </div>
+          ) : transactions.slice(0, 20).map((txn) => (
+            <div key={txn.id} className="glass rounded-lg p-3 flex items-center justify-between" data-testid={`txn-${txn.id}`}>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${txn.amount > 0 ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+                  {txn.amount > 0 ? <ArrowDownLeft size={14} className="text-green-400" /> : <ArrowUpRight size={14} className="text-red-400" />}
                 </div>
-                <span className={`text-sm font-bold mono ${txn.amount > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {txn.amount > 0 ? '+' : ''}{txn.amount} {txn.currency?.toUpperCase()}
-                </span>
+                <div className="min-w-0">
+                  <p className="text-xs text-white font-medium truncate">{txn.description}</p>
+                  <p className="text-[10px] text-white/30 mono">{new Date(txn.created_at).toLocaleDateString()}</p>
+                </div>
               </div>
-            ))
-          )}
+              <span className={`text-sm font-bold mono shrink-0 ${txn.amount > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {txn.amount > 0 ? '+' : ''}{txn.amount} {txn.currency?.toUpperCase()}
+              </span>
+            </div>
+          ))}
         </div>
       </div>
 

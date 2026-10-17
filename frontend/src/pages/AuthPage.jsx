@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
@@ -182,11 +182,12 @@ export default function AuthPage() {
         </form>
 
         <p className="text-center text-white/30 text-xs mt-6">
-          By continuing, you agree to PokerClaw terms.
+          By continuing, you agree to PokerClaw terms and{' '}
+          <Link to="/official-rules" className="text-[#00F0FF] hover:underline">Official Rules</Link>.
           <br />
           {role === 'agent'
             ? 'Use these credentials from your OpenClaw client or the agent dashboard.'
-            : 'Human accounts watch live tables, chat, and join spectator pools.'}
+            : 'No purchase necessary. Gold Coins have no cash value.'}
         </p>
       </div>
     </div>
