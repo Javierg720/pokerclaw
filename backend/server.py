@@ -3,6 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from deps import db, client, ensure_database_indexes, logger, get_user_from_token
 from game_engine import AGENT_PRESETS, AVATAR_URLS
+from agent_entertainment import public_personality
 import os
 import uuid
 import json
@@ -102,7 +103,12 @@ async def websocket_table(websocket: WebSocket, table_id: str):
         count = table_manager.spectator_count(table_id)
         await table_manager.broadcast(table_id, {"type": "spectator_count", "count": count})
         # Send chat history on connect
-        history = table_manager.get_chat(table_id)
+        history = await db.table_chat_messages.find(
+            {"table_id": table_id}, {"_id": 0}
+        ).sort("timestamp", -1).to_list(50)
+        history.reverse()
+        if not history:
+            history = table_manager.get_chat(table_id)
         if history:
             await websocket.send_json({"type": "chat_history", "messages": history})
         while True:
@@ -111,18 +117,23 @@ async def websocket_table(websocket: WebSocket, table_id: str):
                 msg = json.loads(data)
                 if msg.get("type") == "ping":
                     await websocket.send_json({"type": "pong"})
-                elif msg.get("type") == "chat":
+                elif msg.get("type") == "chat" and user.get("role") == "human":
                     text = msg.get("text", "")[:200]  # Limit length
                     if text.strip():
                         chat_msg = {
+                            "id": str(uuid.uuid4()),
                             "type": "chat",
+                            "table_id": table_id,
                             "username": user.get("username", "Spectator"),
                             "text": text,
                             "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "sender_type": "human",
+                            "source": "human",
                         }
+                        await db.table_chat_messages.insert_one(chat_msg.copy())
                         table_manager.add_chat(table_id, chat_msg)
                         await table_manager.broadcast(table_id, chat_msg)
-                elif msg.get("type") == "reaction":
+                elif msg.get("type") == "reaction" and user.get("role") == "human":
                     emoji = msg.get("emoji", "")
                     if emoji in ("fire", "skull", "clap", "eyes", "money", "crown"):
                         await table_manager.broadcast(table_id, {
@@ -169,10 +180,26 @@ async def seed_data():
                     "strategy": preset['strategy'],
                     "avatar_url": AVATAR_URLS[preset['avatar_index']],
                     "tagline": preset['tagline'], "owner_id": None, "is_house": True,
+                    "personality_key": preset['personality_key'],
+                    "personality": public_personality(preset),
                     "wins": 0, "losses": 0, "total_games": 0, "total_chips_won": 0,
                     "created_at": datetime.now(timezone.utc).isoformat()
                 }
                 await db.agents.insert_one(agent)
+
+    # Keep existing house-agent records on the shipped local art set without
+    # touching user-created agents or their custom avatars.
+    for preset in AGENT_PRESETS:
+        await db.agents.update_many(
+            {"name": preset["name"], "is_house": True},
+            {"$set": {
+                "avatar_url": AVATAR_URLS[preset["avatar_index"]],
+                "tagline": preset["tagline"],
+                "strategy": preset["strategy"],
+                "personality_key": preset["personality_key"],
+                "personality": public_personality(preset),
+            }},
+        )
 
     # Seed/update tables
     agents = await db.agents.find({}, {"_id": 0}).to_list(100)

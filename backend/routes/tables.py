@@ -1,10 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends
 import uuid
 from datetime import datetime, timezone
-from pymongo.errors import DuplicateKeyError
 from deps import db, require_agent, sanitize_game_for_response
 from game_engine import create_deck, advance_game
-from bet_settlement import settle_parimutuel_bets
+from agent_entertainment import publish_action_banter, public_personality
+from game_persistence import (
+    attach_new_game_to_table, finalize_completed_game, persist_game_transition,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -65,6 +67,8 @@ async def start_game(table_id: str, user=Depends(require_agent)):
             "agent_id": agent['id'], "agent_name": agent['name'],
             "avatar_url": agent['avatar_url'], "strategy": agent['strategy'],
             "is_external": agent.get('is_external', False),
+            "personality_key": agent.get('personality_key'),
+            "personality": agent.get('personality') or public_personality(agent),
             "hole_cards": [], "chips": 1000, "current_bet": 0,
             "total_bet": 0, "folded": False, "is_dealer": i == 0,
             "hand_rank": 0, "hand_name": ""
@@ -82,7 +86,7 @@ async def start_game(table_id: str, user=Depends(require_agent)):
         "completed_at": None
     }
     await db.games.insert_one(game)
-    await db.tables.update_one({"id": table_id}, {"$set": {"current_game_id": game_id, "status": "playing"}})
+    await attach_new_game_to_table(table, game_id)
     return sanitize_game_for_response(game)
 
 
@@ -102,6 +106,7 @@ async def advance_game_endpoint(game_id: str, user=Depends(require_agent)):
     if not any(p['agent_id'] == user.get('agent_id') for p in game.get('players', [])):
         raise HTTPException(status_code=403, detail="Your OpenClaw agent is not in this game")
     if game['phase'] == 'complete':
+        await finalize_completed_game(game)
         return sanitize_game_for_response(game)
     current_actor = game.get('current_actor')
     if current_actor:
@@ -112,66 +117,17 @@ async def advance_game_endpoint(game_id: str, user=Depends(require_agent)):
                 detail="Waiting for the current OpenClaw agent to submit its authenticated action",
             )
 
+    action_count_before = len(game.get('actions_log', []))
+    expected_revision = game.get('game_revision')
     updated = advance_game(game)
 
     if updated['phase'] == 'complete':
         updated['completed_at'] = datetime.now(timezone.utc).isoformat()
-        if updated.get('winner_id'):
-            await db.agents.update_one(
-                {"id": updated['winner_id']},
-                {"$inc": {"wins": 1, "total_games": 1, "total_chips_won": updated.get('final_pot', 0)}}
-            )
-            for p in updated['players']:
-                if p['agent_id'] != updated['winner_id']:
-                    await db.agents.update_one(
-                        {"id": p['agent_id']},
-                        {"$inc": {"losses": 1, "total_games": 1}}
-                    )
-
-            winner_agent = await db.agents.find_one({"id": updated['winner_id']}, {"_id": 0})
-            if winner_agent and winner_agent.get('owner_id'):
-                winnings = updated.get('final_pot', 0)
-                sc_credit = max(1, winnings // 10)
-                # Idempotent wallet credit: guard with credited_game_ids set
-                await db.wallets.update_one(
-                    {
-                        "user_id": winner_agent['owner_id'],
-                        "credited_game_ids": {"$ne": game_id},
-                    },
-                    {
-                        "$inc": {"sc_balance": sc_credit},
-                        "$addToSet": {"credited_game_ids": game_id},
-                    },
-                )
-                # Idempotent transaction record: deterministic ID prevents duplicates
-                txn_id = f"game-win:{game_id}"
-                txn_doc = {
-                    "id": txn_id,
-                    "user_id": winner_agent['owner_id'],
-                    "type": "game_winnings", "amount": sc_credit, "currency": "sc",
-                    "description": f"{winner_agent['name']} won {winnings} chips (pot after 20% rake)",
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                }
-                try:
-                    await db.transactions.update_one(
-                        {"id": txn_id}, {"$setOnInsert": txn_doc}, upsert=True
-                    )
-                except DuplicateKeyError:
-                    pass  # already recorded – idempotent
-
-        await settle_parimutuel_bets(
-            "bets", {"game_id": game_id}, updated.get("winner_id"),
-            "bet_won", "Won bet on game",
-        )
-
-        if updated.get('table_id'):
-            await db.tables.update_one(
-                {"id": updated['table_id']},
-                {"$set": {"status": "waiting"}}
-            )
-
-    save_doc = {k: v for k, v in updated.items() if k != '_id'}
-    await db.games.replace_one({"id": game_id}, save_doc)
+    await persist_game_transition(updated, expected_revision)
+    if updated['phase'] == 'complete':
+        await finalize_completed_game(updated)
+    new_actions = updated.get('actions_log', [])[action_count_before:]
+    await publish_action_banter(updated, new_actions)
 
     # Broadcast via websocket
     try:
@@ -185,3 +141,14 @@ async def advance_game_endpoint(game_id: str, user=Depends(require_agent)):
         pass
 
     return sanitize_game_for_response(updated)
+
+
+@router.get("/tables/{table_id}/chat-log")
+async def get_table_chat_log(table_id: str):
+    if not await db.tables.find_one({"id": table_id}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=404, detail="Table not found")
+    messages = await db.table_chat_messages.find(
+        {"table_id": table_id}, {"_id": 0}
+    ).sort("timestamp", -1).to_list(50)
+    messages.reverse()
+    return {"messages": messages}

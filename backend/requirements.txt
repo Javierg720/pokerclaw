@@ -1,12 +1,13 @@
 # Production dependencies only — dev tools and unused packages removed.
 # emergentintegrations is an internal emergent.sh package; it is not on PyPI.
 
-fastapi==0.110.1
-uvicorn==0.25.0
+fastapi==0.143.3
+uvicorn==0.40.0
+websockets>=12.0,<16.0
 python-dotenv>=1.0.1
-motor==3.3.1
-pymongo==4.5.0
-pydantic>=2.6.4
+motor==3.7.1
+pymongo==4.19.0
+pydantic>=2.9.0
 email-validator>=2.2.0
 pyjwt>=2.10.1
 bcrypt==4.1.3

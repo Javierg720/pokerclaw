@@ -16,6 +16,17 @@ export function BettingPanel({ game, onBetPlaced }) {
   const [placing, setPlacing] = useState(false);
   const [odds, setOdds] = useState(null);
   const [myBets, setMyBets] = useState([]);
+  const [scPlayEnabled, setScPlayEnabled] = useState(false);
+
+  useEffect(() => {
+    api.get('/sweepstakes/config')
+      .then((res) => setScPlayEnabled(Boolean(res.data?.sc_play_enabled)))
+      .catch(() => setScPlayEnabled(false));
+  }, []);
+
+  useEffect(() => {
+    if (!scPlayEnabled && currency === 'sc') setCurrency('gc');
+  }, [currency, scPlayEnabled]);
 
   const fetchOdds = useCallback(async () => {
     if (!game?.id) return;
@@ -51,6 +62,8 @@ export function BettingPanel({ game, onBetPlaced }) {
         agent_id: selectedAgent,
         amount: betAmount[0],
         currency,
+      }, {
+        headers: { 'Idempotency-Key': window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}` },
       });
       sounds.betPlaced();
       toast.success(`Bet placed: ${betAmount[0]} ${currency.toUpperCase()}`);
@@ -103,11 +116,9 @@ export function BettingPanel({ game, onBetPlaced }) {
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
-                  <img
-                    src={player.avatar_url}
-                    alt={player.agent_name}
-                    className="w-7 h-7 rounded-full object-cover"
-                  />
+                  <span className="agent-avatar-frame agent-avatar-frame--bet">
+                    <img src={player.avatar_url} alt={player.agent_name} className="agent-avatar rounded-full object-cover" />
+                  </span>
                   <div>
                     <span className="text-xs font-bold text-white block">{player.agent_name}</span>
                     {myBet && (
@@ -152,7 +163,9 @@ export function BettingPanel({ game, onBetPlaced }) {
           <button
             type="button"
             onClick={() => setCurrency('sc')}
-            className={`rounded-lg py-2 text-[10px] font-bold border ${currency === 'sc' ? 'border-[#00F0FF]/50 bg-[#00F0FF]/10 text-[#00F0FF]' : 'border-white/5 text-white/30'}`}
+            disabled={!scPlayEnabled}
+            title={scPlayEnabled ? undefined : 'Sweepstakes Coin play is not available'}
+            className={`rounded-lg py-2 text-[10px] font-bold border disabled:cursor-not-allowed disabled:opacity-40 ${currency === 'sc' ? 'border-[#00F0FF]/50 bg-[#00F0FF]/10 text-[#00F0FF]' : 'border-white/5 text-white/30'}`}
           >
             SWEEPSTAKES COINS
           </button>
@@ -190,7 +203,7 @@ export function BettingPanel({ game, onBetPlaced }) {
 
       <Button
         onClick={placeBet}
-        disabled={!selectedAgent || placing}
+        disabled={!selectedAgent || placing || (currency === 'sc' && !scPlayEnabled)}
         data-testid="place-bet-btn"
         className="w-full bg-[#FF003C] hover:bg-[#cc0030] text-white font-bold rounded-xl disabled:opacity-40"
       >

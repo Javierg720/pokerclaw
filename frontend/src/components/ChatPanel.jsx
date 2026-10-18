@@ -10,12 +10,18 @@ const REACTIONS = [
   { key: 'crown', icon: Crown, color: '#FFE600' },
 ];
 
-export function ChatPanel({ chatMessages, reactions, onSendChat, onSendReaction, username }) {
+export function ChatPanel({ chatMessages, reactions, onSendChat, onSendReaction, username, onOpenChange }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const scrollRef = useRef(null);
   const unread = useRef(0);
   const [unreadCount, setUnreadCount] = useState(0);
+  const latestAgentMessage = [...chatMessages].reverse().find((msg) => msg.sender_type === 'agent');
+
+  const setPanelOpen = (value) => {
+    setOpen(value);
+    onOpenChange?.(value);
+  };
 
   useEffect(() => {
     if (open && scrollRef.current) {
@@ -57,18 +63,31 @@ export function ChatPanel({ chatMessages, reactions, onSendChat, onSendReaction,
 
       {/* Chat toggle button */}
       {!open && (
-        <button
-          onClick={() => { setOpen(true); unread.current = 0; setUnreadCount(0); }}
-          data-testid="chat-toggle-btn"
-          className="fixed bottom-24 right-4 z-50 w-11 h-11 rounded-full bg-[#FF003C] flex items-center justify-center shadow-lg shadow-[#FF003C]/20 hover:scale-105 transition-transform"
-        >
-          <MessageCircle size={18} className="text-white" />
-          {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-[#00F0FF] text-[9px] font-black text-black flex items-center justify-center">
-              {unreadCount > 9 ? '9+' : unreadCount}
-            </span>
+        <>
+          {latestAgentMessage && unreadCount > 0 && (
+            <button
+              type="button"
+              onClick={() => { setPanelOpen(true); unread.current = 0; setUnreadCount(0); }}
+              className="fixed bottom-24 right-20 z-50 max-w-[190px] rounded-xl rounded-br-sm border border-[#00F0FF]/20 bg-[#071014]/95 px-3 py-2 text-left shadow-xl backdrop-blur"
+              data-testid="agent-banter-preview"
+            >
+              <span className="block text-[8px] font-black tracking-widest text-[#00F0FF] uppercase">{latestAgentMessage.username} · BOT</span>
+              <span className="block text-[10px] text-white/70 truncate">{latestAgentMessage.text}</span>
+            </button>
           )}
-        </button>
+          <button
+            onClick={() => { setPanelOpen(true); unread.current = 0; setUnreadCount(0); }}
+            data-testid="chat-toggle-btn"
+            className="fixed bottom-24 right-4 z-50 w-12 h-12 rounded-full bg-[#FF003C] flex items-center justify-center shadow-lg shadow-[#FF003C]/20 hover:scale-105 transition-transform"
+          >
+            <MessageCircle size={22} strokeWidth={2.5} className="text-white" />
+            {unreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-[#00F0FF] text-[9px] font-black text-black flex items-center justify-center">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
+        </>
       )}
 
       {/* Chat panel */}
@@ -80,8 +99,11 @@ export function ChatPanel({ chatMessages, reactions, onSendChat, onSendReaction,
         >
           {/* Header */}
           <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.06]">
-            <span className="text-[11px] font-bold text-white/60 uppercase tracking-widest">Live Chat</span>
-            <button onClick={() => setOpen(false)} data-testid="chat-close-btn" className="text-white/30 hover:text-white">
+            <div>
+              <span className="block text-[11px] font-bold text-white/70 uppercase tracking-widest">Table Talk</span>
+              <span className="block text-[8px] text-[#00F0FF]/60">Humans + clearly labeled agents</span>
+            </div>
+            <button onClick={() => setPanelOpen(false)} data-testid="chat-close-btn" className="text-white/30 hover:text-white">
               <X size={14} />
             </button>
           </div>
@@ -107,9 +129,15 @@ export function ChatPanel({ chatMessages, reactions, onSendChat, onSendReaction,
               <p className="text-white/15 text-[10px] text-center py-4">No messages yet. Say something!</p>
             )}
             {chatMessages.map((msg, i) => (
-              <div key={i} className="text-[11px]">
-                <span className="font-bold text-[#00F0FF]/70">{msg.username}</span>
-                <span className="text-white/50 ml-1.5">{msg.text}</span>
+              <div key={msg.id || i} className={`text-[11px] rounded-lg px-2 py-1.5 ${msg.sender_type === 'agent' ? 'bg-[#00F0FF]/[0.045] border border-[#00F0FF]/10' : ''}`}>
+                <span className={`font-bold ${msg.sender_type === 'agent' ? 'text-[#00F0FF]' : 'text-white/70'}`}>{msg.username}</span>
+                {msg.sender_type === 'agent' && (
+                  <span className="ml-1 rounded bg-[#00F0FF]/15 px-1 py-0.5 text-[7px] font-black tracking-wider text-[#00F0FF]">BOT</span>
+                )}
+                <span className="text-white/60 ml-1.5">{msg.text}</span>
+                {msg.sender_type === 'agent' && msg.personality && (
+                  <span className="block mt-0.5 text-[8px] text-white/25">{msg.personality} · {msg.source === 'scripted_banter' ? 'scripted banter' : 'OpenClaw-authored'}</span>
+                )}
               </div>
             ))}
           </div>

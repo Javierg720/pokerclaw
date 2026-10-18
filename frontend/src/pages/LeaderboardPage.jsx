@@ -86,10 +86,16 @@ export default function LeaderboardPage() {
                 <div className="flex-1">
                   <div className="text-sm font-bold text-white">{agent.name}</div>
                   <div className="text-[10px] text-white/30">{agent.tagline}</div>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <Badge className="text-[8px] h-4 bg-[#00F0FF]/10 text-[#00F0FF] border-[#00F0FF]/15 capitalize">
+                      {agent.personality?.name || agent.strategy?.replaceAll('_', ' ')}
+                    </Badge>
+                    <span className="text-[9px] text-emerald-400">{agent.decision_source === 'external_agent' ? 'OpenClaw' : 'Verified policy'}</span>
+                  </div>
                 </div>
                 <div className="text-right">
                   <div className="text-sm font-bold text-[#FFE600] mono">{agent.wins}W</div>
-                  <div className="text-[10px] text-white/30">{agent.total_games} games</div>
+                  <div className="text-[10px] text-white/45">{agent.win_rate}% · {agent.total_games} games</div>
                 </div>
               </div>
             ))

@@ -1,10 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel, Field
 from typing import Literal
-import uuid
-from datetime import datetime, timezone
 from deps import db, require_human, bet_limiter
 from sweepstakes import ensure_sc_play_eligible
+from wagering import place_wager
 
 router = APIRouter(prefix="/api")
 
@@ -17,51 +16,40 @@ class BetRequest(BaseModel):
 
 
 @router.post("/bets")
-async def place_bet(req: BetRequest, request: Request, user=Depends(require_human)):
+async def place_bet(
+    req: BetRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    user=Depends(require_human),
+):
     # Rate limit: 60 bets per user per minute
     if not await bet_limiter.is_allowed(user["id"]):
         raise HTTPException(
             status_code=429, detail="Bet rate limit exceeded. Max 60 bets per minute."
         )
+    if not idempotency_key:
+        raise HTTPException(status_code=400, detail="Idempotency-Key header is required")
 
     if req.currency == "sc":
         await ensure_sc_play_eligible(user)
 
-    game = await db.games.find_one({"id": req.game_id}, {"_id": 0})
-    if not game:
-        raise HTTPException(status_code=404, detail="Game not found")
-    if game['phase'] in ('showdown', 'complete'):
-        raise HTTPException(status_code=400, detail="Betting is closed for this game")
+    def validate_game(game: dict) -> None:
+        if not any(player['agent_id'] == req.agent_id for player in game.get('players', [])):
+            raise HTTPException(status_code=400, detail="Agent not in this game")
 
-    agent_in_game = any(p['agent_id'] == req.agent_id for p in game.get('players', []))
-    if not agent_in_game:
-        raise HTTPException(status_code=400, detail="Agent not in this game")
-
-    balance_field = f"{req.currency}_balance"
-    result = await db.wallets.update_one(
-        {"user_id": user['id'], balance_field: {"$gte": req.amount}},
-        {"$inc": {balance_field: -req.amount}},
+    bet = await place_wager(
+        collection_name="bets",
+        event_collection_name="games",
+        event_id=req.game_id,
+        event_open_query={"phase": {"$nin": ["showdown", "complete"]}},
+        validate_event=validate_game,
+        user_id=user["id"],
+        agent_id=req.agent_id,
+        amount=req.amount,
+        currency=req.currency,
+        transaction_type="bet_placed",
+        idempotency_key=idempotency_key,
     )
-    if result.modified_count != 1:
-        raise HTTPException(status_code=400, detail="Insufficient balance")
-
-    bet = {
-        "id": str(uuid.uuid4()), "user_id": user['id'],
-        "game_id": req.game_id, "agent_id": req.agent_id,
-        "amount": req.amount, "currency": req.currency,
-        "status": "pending", "payout": 0,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    await db.bets.insert_one(bet)
-
-    await db.transactions.insert_one({
-        "id": str(uuid.uuid4()), "user_id": user['id'],
-        "type": "bet_placed", "amount": -req.amount, "currency": req.currency,
-        "description": "Bet on game",
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
-
-    return {k: v for k, v in bet.items() if k != '_id'}
+    return {key: value for key, value in bet.items() if key != "_id"}
 
 
 @router.get("/bets/my-bets")
@@ -84,7 +72,7 @@ async def get_game_odds(game_id: str, currency: Literal["sc", "gc"] = "gc"):
     bets = await db.bets.find(
         {"game_id": game_id, "status": "pending", "currency": currency},
         {"_id": 0},
-    ).to_list(1000)
+    ).to_list(None)
     game = await db.games.find_one({"id": game_id}, {"_id": 0})
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")

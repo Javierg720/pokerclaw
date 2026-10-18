@@ -30,25 +30,15 @@ def public_config() -> dict:
     daily_sc_amount = _nonnegative_int("DAILY_FREE_SC", 1)
     free_entry_enabled = _flag("SWEEPSTAKES_NO_PURCHASE_ENTRY_ENABLED", True)
     sc_play_requested = _flag("SWEEPSTAKES_PLAY_ENABLED")
-    # SC play is only enabled when:
-    #  1. The operator has explicitly set SWEEPSTAKES_PLAY_ENABLED=1, AND
-    #  2. A genuine free no-purchase entry path exists (daily_sc_amount >= 1
-    #     and SWEEPSTAKES_NO_PURCHASE_ENTRY_ENABLED is on).
-    # Individual users also require age_verified=True AND
-    # jurisdiction_allowed=True (set via the admin API) before they can wager.
-    sc_play_enabled = (
-        sc_play_requested
-        and daily_sc_amount >= 1
-        and free_entry_enabled
-    )
+    # Release gate: wager accounting and jurisdiction verification still need
+    # live/adversarial certification. Operator flags must never bypass this.
+    sc_play_enabled = False
     sc_play_blocked_reason = (
-        None if sc_play_enabled
-        else (
-            "SC play is disabled. Set SWEEPSTAKES_PLAY_ENABLED=1, ensure "
-            "DAILY_FREE_SC >= 1, keep SWEEPSTAKES_NO_PURCHASE_ENTRY_ENABLED=1, "
-            "then verify users via POST /api/admin/eligibility/{user_id}."
-        )
+        "SC play is unavailable in this GC-only release pending verified "
+        "eligibility, accounting, and legal approval. Environment flags cannot enable it."
     )
+    redemption_requested = _flag("SWEEPSTAKES_REDEMPTION_ENABLED")
+    redemption_enabled = False
     return {
         "model": "purchased_gc_with_promotional_sc",
         "no_purchase_necessary": True,
@@ -56,8 +46,13 @@ def public_config() -> dict:
         "sc_play_enabled": sc_play_enabled,
         "sc_play_requested": sc_play_requested,
         "sc_play_blocked_reason": sc_play_blocked_reason,
-        "funding_enabled": _flag("SWEEPSTAKES_FUNDING_ENABLED"),
-        "redemption_enabled": _flag("SWEEPSTAKES_REDEMPTION_ENABLED"),
+        "funding_enabled": False,
+        "redemption_enabled": redemption_enabled,
+        "redemption_requested": redemption_requested,
+        "redemption_blocked_reason": None if redemption_enabled else (
+            "Crypto redemption is unavailable in this GC-only release."
+        ),
+        "minimum_redemption_sc": max(1, _nonnegative_int("CRYPTO_REDEMPTION_MIN_SC", 2500)),
         "daily_gc_amount": _nonnegative_int("DAILY_FREE_GC", 1000),
         "daily_sc_amount": daily_sc_amount,
         "minimum_age": max(18, _nonnegative_int("SWEEPSTAKES_MINIMUM_AGE", 21)),
@@ -101,6 +96,7 @@ def eligibility_from_profile(profile: dict | None) -> dict:
         "reasons": reasons,
         "age_verified": bool(profile.get("age_verified")),
         "jurisdiction_allowed": bool(profile.get("jurisdiction_allowed")),
+        "identity_verified": bool(profile.get("identity_verified")),
         "self_excluded": _active_self_exclusion(profile),
     }
 
@@ -142,6 +138,27 @@ async def ensure_sc_play_eligible(user: dict) -> None:
             status_code=403,
             detail="Sweepstakes Coin play is not enabled for this deployment.",
         )
+    eligibility = await get_eligibility(user["id"])
+    if not eligibility["eligible"]:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": "Sweepstakes eligibility requirements are not satisfied.",
+                "reasons": eligibility["reasons"],
+            },
+        )
+
+
+async def ensure_redemption_eligible(user: dict) -> None:
+    config = public_config()
+    if not config["redemption_enabled"]:
+        raise HTTPException(status_code=410, detail="Crypto redemption is not enabled for this deployment.")
+    await ensure_sc_play_eligible(user)
+    profile = await db.sweepstakes_profiles.find_one(
+        {"user_id": user["id"]}, {"_id": 0, "identity_verified": 1}
+    )
+    if not (profile or {}).get("identity_verified"):
+        raise HTTPException(status_code=403, detail="Identity verification is required before redemption.")
     eligibility = await get_eligibility(user["id"])
     if not eligibility["eligible"]:
         raise HTTPException(

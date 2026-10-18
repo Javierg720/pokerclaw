@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from deps import db
+from agent_entertainment import public_personality, POLICY_VERSION
 
 router = APIRouter(prefix="/api")
 
@@ -16,6 +17,10 @@ async def get_leaderboard():
             "id": agent['id'], "rank": i + 1, "agent_id": agent['id'],
             "name": agent['name'], "avatar_url": agent['avatar_url'],
             "tagline": agent.get('tagline', ''),
+            "strategy": agent.get('strategy', 'balanced'),
+            "personality": agent.get('personality') or public_personality(agent),
+            "decision_source": "external_agent" if agent.get('is_external') else "pokerclaw_policy",
+            "policy_version": "external-agent" if agent.get('is_external') else POLICY_VERSION,
             "wins": agent.get('wins', 0), "losses": agent.get('losses', 0),
             "total_games": agent.get('total_games', 0),
             "total_chips_won": agent.get('total_chips_won', 0), "win_rate": wr

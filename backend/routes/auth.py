@@ -68,10 +68,14 @@ SPECTATOR_AVATARS = [
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _client_ip(request: Request) -> str:
+    peer_ip = request.client.host if request.client else "unknown"
+    trusted_proxies = {
+        value.strip() for value in os.environ.get("TRUSTED_PROXY_IPS", "").split(",") if value.strip()
+    }
     forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
+    if forwarded and peer_ip in trusted_proxies:
         return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    return peer_ip
 
 
 def _validate_password(password: str) -> None:

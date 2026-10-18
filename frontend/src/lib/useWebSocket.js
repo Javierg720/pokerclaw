@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import api from './api';
 
 export function useTableSocket(tableId) {
   const wsRef = useRef(null);
@@ -68,6 +69,17 @@ export function useTableSocket(tableId) {
     } catch {
       setConnected(false);
     }
+  }, [tableId]);
+
+  useEffect(() => {
+    if (!tableId) return undefined;
+    let active = true;
+    api.get(`/tables/${tableId}/chat-log`)
+      .then((res) => {
+        if (active) setChatMessages(res.data?.messages || []);
+      })
+      .catch(() => {});
+    return () => { active = false; };
   }, [tableId]);
 
   useEffect(() => {

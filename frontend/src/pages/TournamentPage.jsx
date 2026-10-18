@@ -1,48 +1,48 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Navigation } from '../components/Navigation';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Slider } from '../components/ui/slider';
-import { Trophy, Swords, Crown, ChevronRight, Plus, Zap, Coins, RefreshCw } from 'lucide-react';
+import {
+  Trophy, Crown, ChevronRight, Plus, Zap, RefreshCw, Search,
+  Link2, Unlink, Radar, Check, ArrowUpRight, Users, Radio, X,
+} from 'lucide-react';
 import api from '../lib/api';
 import { toast } from 'sonner';
 import { sounds } from '../lib/sounds';
 import { useAuth } from '../context/AuthContext';
 
+const FILTERS = [
+  { id: 'all', label: 'All' }, { id: 'lobby', label: 'Open' },
+  { id: 'live', label: 'Live' }, { id: 'complete', label: 'Finished' },
+  { id: 'linked', label: 'Linked' },
+];
+
+function tournamentState(status) {
+  if (status === 'complete') return { label: 'Finished', className: 'is-finished' };
+  if (status === 'lobby') return { label: 'Open', className: 'is-open' };
+  return { label: 'Live', className: 'is-live' };
+}
+
 function BracketCard({ title, agents, winnerId, runnerUpId, status, gamePhase }) {
   return (
-    <div className="glass rounded-xl p-3 w-full" data-testid={`bracket-${title}`}>
-      <div className="flex items-center justify-between mb-2">
-        <h4 className="text-[10px] font-bold text-white/50 uppercase tracking-widest">{title}</h4>
-        <Badge
-          variant="outline"
-          className={`text-[8px] ${
-            status === 'complete' ? 'border-[#FFE600]/30 text-[#FFE600]' :
-            status === 'active' ? 'border-[#00F0FF]/30 text-[#00F0FF]' :
-            'border-white/20 text-white/30'
-          }`}
-        >
+    <div className="tablepilot-bracket" data-testid={`bracket-${title}`}>
+      <div className="tablepilot-bracket__head">
+        <h4>{title}</h4>
+        <Badge variant="outline" className={`tablepilot-bracket__status is-${status}`}>
           {status === 'complete' ? 'DONE' : status === 'active' ? (gamePhase || 'LIVE') : 'PENDING'}
         </Badge>
       </div>
-      <div className="space-y-1.5">
+      <div className="tablepilot-bracket__agents">
         {agents.map((agent) => {
           const isWinner = winnerId === agent.id;
           const isRunner = runnerUpId === agent.id;
           return (
-            <div
-              key={agent.id}
-              className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all ${
-                isWinner ? 'bg-[#FFE600]/10 border border-[#FFE600]/20' :
-                isRunner ? 'bg-[#00F0FF]/5 border border-[#00F0FF]/10' :
-                status === 'complete' ? 'opacity-30' : 'bg-white/[0.02]'
-              }`}
-              data-testid={`bracket-agent-${agent.id}`}
-            >
-              <img src={agent.avatar_url} alt={agent.name} className="w-6 h-6 rounded-full object-cover" />
-              <span className="text-xs font-semibold text-white flex-1 truncate">{agent.name}</span>
-              {isWinner && <Crown size={12} className="text-[#FFE600]" />}
-              {isRunner && <ChevronRight size={12} className="text-[#00F0FF]" />}
+            <div key={agent.id} className={`tablepilot-bracket__agent ${isWinner ? 'is-winner' : ''} ${isRunner ? 'is-runner' : ''}`} data-testid={`bracket-agent-${agent.id}`}>
+              <img src={agent.avatar_url} alt="" />
+              <span>{agent.name}</span>
+              {isWinner && <Crown size={15} />}
+              {isRunner && <ChevronRight size={15} />}
             </div>
           );
         })}
@@ -54,43 +54,126 @@ function BracketCard({ title, agents, winnerId, runnerUpId, status, gamePhase })
 export default function TournamentPage() {
   const { user, isAgent, isHuman } = useAuth();
   const [tournaments, setTournaments] = useState([]);
+  const [linkedIds, setLinkedIds] = useState([]);
+  const [selectedIds, setSelectedIds] = useState([]);
   const [selected, setSelected] = useState(null);
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [linking, setLinking] = useState(false);
   const [advancing, setAdvancing] = useState(false);
   const [betAgent, setBetAgent] = useState(null);
   const [betAmount, setBetAmount] = useState([50]);
   const [betCurrency, setBetCurrency] = useState('gc');
+  const [scPlayEnabled, setScPlayEnabled] = useState(false);
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState('all');
 
   const fetchData = useCallback(async () => {
     try {
-      const [tRes, aRes] = await Promise.all([
-        api.get('/tournaments'),
-        api.get('/agents')
+      const [tRes, aRes, pilotRes] = await Promise.all([
+        api.get('/tournaments'), api.get('/agents'), api.get('/table-pilot'),
       ]);
       setTournaments(tRes.data);
       setAgents(aRes.data);
-      setSelected((current) => {
-        if (!current) return current;
-        return tRes.data.find(t => t.id === current.id) || current;
-      });
+      setLinkedIds(pilotRes.data?.tournament_ids || []);
+      setSelected((current) => current
+        ? tRes.data.find((item) => item.id === current.id) || current
+        : tRes.data[0] || null);
     } catch {
-      toast.error('Failed to load tournaments');
+      toast.error('TablePilot could not load tournament data');
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    api.get('/sweepstakes/config')
+      .then((res) => setScPlayEnabled(Boolean(res.data?.sc_play_enabled)))
+      .catch(() => setScPlayEnabled(false));
+  }, []);
+  useEffect(() => {
+    if (!scPlayEnabled && betCurrency === 'sc') setBetCurrency('gc');
+  }, [betCurrency, scPlayEnabled]);
+
+  const linkedSet = useMemo(() => new Set(linkedIds), [linkedIds]);
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const liveCount = useMemo(() => tournaments.filter((item) => item.status !== 'lobby' && item.status !== 'complete').length, [tournaments]);
+  const filteredTournaments = useMemo(() => {
+    const search = query.trim().toLowerCase();
+    return tournaments.filter((item) => {
+      const state = tournamentState(item.status).label.toLowerCase();
+      const matchesQuery = !search || [item.name, item.champion_name, state]
+        .filter(Boolean).some((value) => value.toLowerCase().includes(search));
+      const matchesFilter = filter === 'all'
+        || (filter === 'linked' && linkedSet.has(item.id))
+        || (filter === 'live' && item.status !== 'lobby' && item.status !== 'complete')
+        || item.status === filter;
+      return matchesQuery && matchesFilter;
+    });
+  }, [filter, linkedSet, query, tournaments]);
+
+  const getAgentById = (id) => agents.find((agent) => agent.id === id)
+    || { id, name: 'Unknown agent', avatar_url: '/assets/avatars/crab-avatar-red.png' };
+  const getBracketAgents = (agentIds) => (agentIds || []).map(getAgentById);
 
   const createTournament = async () => {
     try {
       const res = await api.post('/tournaments');
-      toast.success('Tournament created!');
+      await api.post('/table-pilot/links', { tournament_ids: [res.data.id] });
       setSelected(res.data);
+      sounds.notification();
+      toast.success('Tournament created and linked to TablePilot');
       fetchData();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to create');
+      toast.error(err.response?.data?.detail || 'Failed to create tournament');
+    }
+  };
+
+  const toggleSelection = (tournamentId) => {
+    setSelectedIds((current) => current.includes(tournamentId)
+      ? current.filter((id) => id !== tournamentId) : [...current, tournamentId]);
+  };
+
+  const linkSelected = async () => {
+    if (!selectedIds.length || linking) return;
+    setLinking(true);
+    try {
+      const res = await api.post('/table-pilot/links', { tournament_ids: selectedIds });
+      setLinkedIds(res.data.tournament_ids || []);
+      setSelectedIds([]);
+      sounds.notification();
+      toast.success(`${selectedIds.length} tournament${selectedIds.length === 1 ? '' : 's'} linked`);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Could not link tournaments');
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  const linkTournament = async (tournamentId) => {
+    if (linking) return;
+    setLinking(true);
+    try {
+      const res = await api.post('/table-pilot/links', { tournament_ids: [tournamentId] });
+      setLinkedIds(res.data.tournament_ids || []);
+      setSelectedIds((current) => current.filter((id) => id !== tournamentId));
+      sounds.notification();
+      toast.success('Tournament linked to your command board');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Could not link tournament');
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  const unlinkTournament = async (tournamentId) => {
+    try {
+      const res = await api.delete(`/table-pilot/links/${tournamentId}`);
+      setLinkedIds(res.data.tournament_ids || []);
+      toast.success('Tournament removed from your command board');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Could not unlink tournament');
     }
   };
 
@@ -104,9 +187,7 @@ export default function TournamentPage() {
       if (res.data.status === 'complete') {
         sounds.winFanfare();
         toast.success(`${res.data.champion_name} is the champion!`);
-      } else {
-        toast.success(`Round advanced!`);
-      }
+      } else toast.success('Round advanced');
       fetchData();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to advance');
@@ -119,289 +200,171 @@ export default function TournamentPage() {
     if (!betAgent || !selected) return;
     try {
       await api.post('/tournament-bets', {
-        tournament_id: selected.id,
-        agent_id: betAgent,
-        amount: betAmount[0],
-        currency: betCurrency,
-      });
+        tournament_id: selected.id, agent_id: betAgent,
+        amount: betAmount[0], currency: betCurrency,
+      }, { headers: { 'Idempotency-Key': window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}` } });
       sounds.betPlaced();
-      toast.success(`Bet placed on tournament winner!`);
+      toast.success('Bet placed on tournament winner');
       setBetAgent(null);
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Bet failed');
     }
   };
 
-  const getAgentById = (id) => agents.find(a => a.id === id) || { id, name: '???', avatar_url: '' };
-
-  // Build bracket agents
-  const getBracketAgents = (agentIds) => (agentIds || []).map(getAgentById);
-
-  if (loading) {
-    return (
-      <div className="main-content flex items-center justify-center">
-        <div className="text-white/30 neon-pulse">Loading...</div>
-        <Navigation />
-      </div>
-    );
-  }
+  if (loading) return (
+    <div className="main-content tablepilot-loading">
+      <Radar size={34} className="tablepilot-loading__radar" /><span>Opening TablePilot...</span><Navigation />
+    </div>
+  );
 
   return (
-    <div className="main-content" data-testid="tournament-page">
-      <div className="px-4 pt-6 pb-4">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-black text-white tracking-tight flex items-center gap-2">
-            <Swords size={20} className="text-[#FF003C]" />
-            TOURNAMENTS
-          </h1>
-          {isAgent && (
-            <Button
-              onClick={createTournament}
-              data-testid="create-tournament-btn"
-              size="sm"
-              className="bg-[#FF003C] hover:bg-[#cc0030] text-white font-bold rounded-lg text-xs"
-            >
-              <Plus size={12} className="mr-1" /> NEW
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {!selected ? (
-        /* Tournament List */
-        <div className="px-4 space-y-3">
-          {tournaments.length === 0 ? (
-            <div className="text-center py-12">
-              <Swords size={40} className="text-white/10 mx-auto mb-4" />
-              <p className="text-white/30 text-sm">
-                {isAgent ? 'No tournaments yet. Create one!' : 'No live agent tournaments yet.'}
-              </p>
+    <div className="main-content tablepilot-page" data-testid="tablepilot-page">
+      <main className="tablepilot-shell">
+        <section className="tablepilot-hero">
+          <div className="tablepilot-hero__copy">
+            <div className="tablepilot-eyebrow"><Radar size={14} /> TOURNAMENT COMMAND</div>
+            <h1>Find it. Link it.<br /><span>Run the room.</span></h1>
+            <p>TablePilot puts every tournament, bracket, and live status on one command board—without the navigation maze.</p>
+            <div className="tablepilot-stats" aria-label="Tournament overview">
+              <div><strong>{tournaments.length}</strong><span>Available</span></div>
+              <div><strong>{liveCount}</strong><span>Live now</span></div>
+              <div><strong>{linkedIds.length}</strong><span>Linked</span></div>
             </div>
-          ) : (
-            tournaments.map((t) => (
-              <div
-                key={t.id}
-                onClick={() => setSelected(t)}
-                className="table-card float-up"
-                data-testid={`tournament-card-${t.id}`}
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <h3 className="text-sm font-bold text-white">{t.name}</h3>
-                    <p className="text-white/30 text-[10px] mono mt-0.5">8 agents bracket</p>
-                  </div>
-                  <Badge
-                    variant="outline"
-                    className={`text-[10px] ${
-                      t.status === 'complete' ? 'border-[#FFE600]/30 text-[#FFE600]' :
-                      t.status === 'lobby' ? 'border-white/20 text-white/40' :
-                      'border-[#00F0FF]/30 text-[#00F0FF]'
-                    }`}
-                  >
-                    {t.status === 'complete' ? 'FINISHED' : t.status === 'lobby' ? 'OPEN' : 'LIVE'}
-                  </Badge>
-                </div>
-                {t.champion_name && (
-                  <div className="flex items-center gap-1.5 text-xs text-[#FFE600]">
-                    <Crown size={12} /> {t.champion_name}
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      ) : (
-        /* Tournament Detail / Bracket */
-        <div className="px-4 space-y-4">
-          <button
-            onClick={() => setSelected(null)}
-            data-testid="back-to-tournaments"
-            className="text-white/40 text-xs hover:text-white transition-colors"
-          >
-            &larr; All Tournaments
-          </button>
-
-          <div className="text-center mb-4">
-            <h2 className="text-base font-black text-white">{selected.name}</h2>
-            <Badge
-              variant="outline"
-              className={`text-[10px] mt-1 ${
-                selected.status === 'complete' ? 'border-[#FFE600]/30 text-[#FFE600]' :
-                'border-[#00F0FF]/30 text-[#00F0FF]'
-              }`}
-            >
-              {selected.status?.toUpperCase()}
-            </Badge>
           </div>
+          <img src="/assets/tablepilot-command-art.webp" alt="PokerClaw robotic crab operating a holographic tournament bracket" className="tablepilot-hero__art" />
+          <div className="tablepilot-hero__scan" aria-hidden="true" />
+        </section>
 
-          {/* Bracket */}
-          <div className="space-y-3">
-            {/* Semi-finals */}
-            <div className="grid grid-cols-2 gap-3">
-              <BracketCard
-                title="Semi 1"
-                agents={getBracketAgents(selected.bracket?.semi_1?.agent_ids)}
-                winnerId={selected.bracket?.semi_1?.winners?.[0]}
-                runnerUpId={selected.bracket?.semi_1?.winners?.[1]}
-                status={selected.bracket?.semi_1?.complete ? 'complete' : selected.status === 'semis' ? 'active' : 'pending'}
-                gamePhase={selected.bracket?.semi_1?.game_phase}
-              />
-              <BracketCard
-                title="Semi 2"
-                agents={getBracketAgents(selected.bracket?.semi_2?.agent_ids)}
-                winnerId={selected.bracket?.semi_2?.winners?.[0]}
-                runnerUpId={selected.bracket?.semi_2?.winners?.[1]}
-                status={selected.bracket?.semi_2?.complete ? 'complete' : selected.status === 'semis' ? 'active' : 'pending'}
-                gamePhase={selected.bracket?.semi_2?.game_phase}
-              />
+        <section className="tablepilot-toolbar" aria-label="Tournament search and filters">
+          <label className="tablepilot-search">
+            <Search size={19} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tournaments or champions" data-testid="tablepilot-search" />
+            {query && <button onClick={() => setQuery('')} aria-label="Clear search"><X size={16} /></button>}
+          </label>
+          <div className="tablepilot-filters">
+            {FILTERS.map((item) => (
+              <button key={item.id} className={filter === item.id ? 'is-active' : ''} onClick={() => setFilter(item.id)} data-testid={`tablepilot-filter-${item.id}`}>
+                {item.label}{item.id === 'linked' && <span>{linkedIds.length}</span>}
+              </button>
+            ))}
+          </div>
+          {isAgent && <Button onClick={createTournament} data-testid="create-tournament-btn" className="tablepilot-new"><Plus size={16} /> New tournament</Button>}
+        </section>
+
+        <div className="tablepilot-workspace">
+          <section className="tablepilot-discovery" aria-label="Tournament discovery">
+            <div className="tablepilot-section-head">
+              <div><span>DISCOVERY</span><h2>{filter === 'linked' ? 'Your linked tournaments' : 'Tournament radar'}</h2></div>
+              <small>{filteredTournaments.length} result{filteredTournaments.length === 1 ? '' : 's'}</small>
             </div>
-
-            {/* Connector */}
-            <div className="flex justify-center">
-              <div className="w-px h-6 bg-gradient-to-b from-[#00F0FF]/30 to-[#FFE600]/30" />
+            <div className="tablepilot-list">
+              {filteredTournaments.length === 0 ? (
+                <div className="tablepilot-empty"><Radar size={30} /><strong>No signal found</strong><span>Try another search or status filter.</span></div>
+              ) : filteredTournaments.map((tournament) => {
+                const state = tournamentState(tournament.status);
+                const isLinked = linkedSet.has(tournament.id);
+                const isPicked = selectedSet.has(tournament.id);
+                const isFocused = selected?.id === tournament.id;
+                return (
+                  <article key={tournament.id} className={`tablepilot-card ${isFocused ? 'is-focused' : ''}`} data-testid={`tournament-card-${tournament.id}`} onClick={() => setSelected(tournament)}>
+                    <button type="button" className={`tablepilot-card__select ${isPicked ? 'is-selected' : ''}`} onClick={(event) => { event.stopPropagation(); toggleSelection(tournament.id); }} aria-label={`${isPicked ? 'Deselect' : 'Select'} ${tournament.name}`}>
+                      {isPicked && <Check size={14} />}
+                    </button>
+                    <div className="tablepilot-card__signal"><Radio size={16} /></div>
+                    <div className="tablepilot-card__body">
+                      <div className="tablepilot-card__title"><h3>{tournament.name}</h3><span className={`tablepilot-status ${state.className}`}>{state.label}</span></div>
+                      <div className="tablepilot-card__meta"><span><Users size={13} /> {tournament.agent_ids?.length || 8} agents</span><span><Trophy size={13} /> {tournament.champion_name || 'Bracket active'}</span></div>
+                    </div>
+                    {isLinked && <span className="tablepilot-card__linked"><Link2 size={12} /> Linked</span>}
+                    <ArrowUpRight className="tablepilot-card__arrow" size={18} />
+                  </article>
+                );
+              })}
             </div>
-
-            {/* Final */}
-            <BracketCard
-              title="FINAL"
-              agents={getBracketAgents(selected.bracket?.final?.agent_ids)}
-              winnerId={selected.bracket?.final?.winner}
-              status={
-                selected.bracket?.final?.complete ? 'complete' :
-                selected.status === 'final' ? 'active' : 'pending'
-              }
-              gamePhase={selected.bracket?.final?.game_phase}
-            />
-
-            {/* Champion */}
-            {selected.champion_name && (
-              <div className="glass rounded-2xl p-5 text-center glow-gold">
-                <Crown size={28} className="text-[#FFE600] mx-auto mb-2" />
-                <h3 className="text-lg font-black text-[#FFE600]">{selected.champion_name}</h3>
-                <p className="text-white/40 text-xs mt-1">Tournament Champion</p>
+            {selectedIds.length > 0 && (
+              <div className="tablepilot-linkbar">
+                <div><strong>{selectedIds.length}</strong><span>selected</span></div>
+                <button onClick={linkSelected} disabled={linking} data-testid="link-selected-btn"><Link2 size={16} /> {linking ? 'Linking...' : 'Link to command board'}</button>
+                <button className="tablepilot-linkbar__clear" onClick={() => setSelectedIds([])} aria-label="Clear selection"><X size={16} /></button>
               </div>
             )}
-          </div>
+          </section>
 
-          {/* Late Join - Swap agents before tournament starts */}
-          {isAgent && selected.status === 'lobby' && !selected.agent_ids?.includes(user?.agent_id) && (
-            <div className="glass rounded-2xl p-4 space-y-3" data-testid="tournament-late-join">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-bold text-white/60 uppercase tracking-widest flex items-center gap-1.5">
-                  <RefreshCw size={12} className="text-[#00F0FF]" />
-                  JOIN TOURNAMENT
-                </h4>
-                <span className="text-[9px] text-white/20">Choose a seat for your agent</span>
-              </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                {(selected.agent_ids || []).map((aid, idx) => {
-                  const agent = getAgentById(aid);
-                  return (
-                    <button
-                      key={`${aid}-${idx}`}
-                      onClick={async () => {
-                        try {
-                          const res = await api.post(`/tournaments/${selected.id}/join`, {
-                            slot_index: idx,
-                            agent_id: user.agent_id,
-                          });
-                          setSelected(res.data);
-                          toast.success('Your OpenClaw agent joined the tournament!');
-                          fetchData();
-                        } catch (err) {
-                          toast.error(err.response?.data?.detail || 'Swap failed');
-                        }
-                      }}
-                      data-testid={`swap-slot-${idx}`}
-                      className="rounded-lg p-2 text-left transition-all border border-white/5 bg-white/[0.02] hover:border-[#00F0FF]/30 hover:bg-[#00F0FF]/5 flex items-center gap-2"
-                    >
-                      <img src={agent.avatar_url} alt="" className="w-5 h-5 rounded-full object-cover" />
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[10px] font-semibold text-white truncate block">{agent.name}</span>
-                        <span className="text-[8px] text-white/20">Slot {idx + 1}</span>
-                      </div>
-                      <RefreshCw size={10} className="text-white/15 flex-shrink-0" />
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          <aside className="tablepilot-command" aria-label="Tournament command view">
+            {selected ? (
+              <>
+                <header className="tablepilot-command__head">
+                  <div><span>COMMAND VIEW</span><h2>{selected.name}</h2></div>
+                  <div className="tablepilot-command__actions">
+                    <span className={`tablepilot-status ${tournamentState(selected.status).className}`}>{tournamentState(selected.status).label}</span>
+                    {linkedSet.has(selected.id) ? (
+                      <button onClick={() => unlinkTournament(selected.id)} data-testid={`unlink-tournament-${selected.id}`}><Unlink size={15} /> Unlink</button>
+                    ) : (
+                      <button onClick={() => linkTournament(selected.id)}><Link2 size={15} /> Link</button>
+                    )}
+                  </div>
+                </header>
 
-          {/* Advance Button */}
-          {isAgent && selected.agent_ids?.includes(user?.agent_id) && selected.status !== 'complete' && (
-            <Button
-              onClick={advanceRound}
-              disabled={advancing}
-              data-testid="advance-tournament-btn"
-              className="w-full bg-[#FF003C] hover:bg-[#cc0030] text-white font-bold rounded-xl py-3 disabled:opacity-40"
-            >
-              {advancing ? 'Processing...' :
-                selected.status === 'lobby' ? 'START TOURNAMENT' :
-                'ADVANCE ROUND'}
-            </Button>
-          )}
-
-          {/* Tournament Betting */}
-          {isHuman && selected.status !== 'complete' && (
-            <div className="glass rounded-2xl p-4 space-y-3" data-testid="tournament-betting">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-bold text-white/60 uppercase tracking-widest">
-                  Bet on Champion
-                </h4>
-                <div className="sweep-toggle">
-                  <button
-                    onClick={() => setBetCurrency('gc')}
-                    className={`sweep-toggle-btn ${betCurrency === 'gc' ? 'active-gc' : ''}`}
-                  >GC</button>
-                  <button
-                    onClick={() => setBetCurrency('sc')}
-                    className={`sweep-toggle-btn ${betCurrency === 'sc' ? 'active-sc' : ''}`}
-                  >SC</button>
+                <div className="tablepilot-bracket-grid">
+                  <BracketCard title="Semi 1" agents={getBracketAgents(selected.bracket?.semi_1?.agent_ids)} winnerId={selected.bracket?.semi_1?.winners?.[0]} runnerUpId={selected.bracket?.semi_1?.winners?.[1]} status={selected.bracket?.semi_1?.complete ? 'complete' : selected.status === 'semis' ? 'active' : 'pending'} gamePhase={selected.bracket?.semi_1?.game_phase} />
+                  <BracketCard title="Semi 2" agents={getBracketAgents(selected.bracket?.semi_2?.agent_ids)} winnerId={selected.bracket?.semi_2?.winners?.[0]} runnerUpId={selected.bracket?.semi_2?.winners?.[1]} status={selected.bracket?.semi_2?.complete ? 'complete' : selected.status === 'semis' ? 'active' : 'pending'} gamePhase={selected.bracket?.semi_2?.game_phase} />
+                  <div className="tablepilot-bracket__connector"><span /></div>
+                  <BracketCard title="Championship final" agents={getBracketAgents(selected.bracket?.final?.agent_ids)} winnerId={selected.bracket?.final?.winner} status={selected.bracket?.final?.complete ? 'complete' : selected.status === 'final' ? 'active' : 'pending'} gamePhase={selected.bracket?.final?.game_phase} />
                 </div>
-              </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                {(selected.bracket?.semi_1?.agent_ids || [])
-                  .concat(selected.bracket?.semi_2?.agent_ids || [])
-                  .map((aid) => {
-                    const agent = getAgentById(aid);
-                    return (
-                      <button
-                        key={aid}
-                        onClick={() => setBetAgent(aid)}
-                        data-testid={`tourney-bet-agent-${aid}`}
-                        className={`rounded-lg p-1.5 text-left transition-all border flex items-center gap-1.5 ${
-                          betAgent === aid
-                            ? 'border-[#FF003C]/50 bg-[#FF003C]/10'
-                            : 'border-white/5 bg-white/[0.02]'
-                        }`}
-                      >
-                        <img src={agent.avatar_url} alt="" className="w-5 h-5 rounded-full object-cover" />
-                        <span className="text-[10px] font-semibold text-white truncate">{agent.name}</span>
-                      </button>
-                    );
-                  })}
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-white/40">Amount</span>
-                <span className={`font-bold mono ${betCurrency === 'gc' ? 'text-[#FFE600]' : 'text-[#00F0FF]'}`}>
-                  {betAmount[0]} {betCurrency.toUpperCase()}
-                </span>
-              </div>
-              <Slider value={betAmount} onValueChange={setBetAmount} min={10} max={500} step={10} />
-              <Button
-                onClick={placeTournamentBet}
-                disabled={!betAgent}
-                data-testid="place-tourney-bet-btn"
-                className="w-full bg-[#FF003C] hover:bg-[#cc0030] text-white font-bold rounded-xl disabled:opacity-40 text-sm"
-              >
-                BET {betAmount[0]} {betCurrency.toUpperCase()}
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
 
+                {selected.champion_name && <div className="tablepilot-champion"><Crown size={25} /><div><span>TOURNAMENT CHAMPION</span><strong>{selected.champion_name}</strong></div></div>}
+
+                {isAgent && selected.status === 'lobby' && !selected.agent_ids?.includes(user?.agent_id) && (
+                  <div className="tablepilot-control-card" data-testid="tournament-late-join">
+                    <div className="tablepilot-control-card__head"><h4><RefreshCw size={14} /> Join tournament</h4><span>Choose a seat for your agent</span></div>
+                    <div className="tablepilot-seat-grid">
+                      {(selected.agent_ids || []).map((agentId, index) => {
+                        const agent = getAgentById(agentId);
+                        return (
+                          <button key={`${agentId}-${index}`} onClick={async () => {
+                            try {
+                              const res = await api.post(`/tournaments/${selected.id}/join`, { slot_index: index, agent_id: user.agent_id });
+                              setSelected(res.data); toast.success('Your OpenClaw agent joined the tournament'); fetchData();
+                            } catch (err) { toast.error(err.response?.data?.detail || 'Swap failed'); }
+                          }} data-testid={`swap-slot-${index}`}>
+                            <img src={agent.avatar_url} alt="" /><span><strong>{agent.name}</strong><small>Seat {index + 1}</small></span><RefreshCw size={12} />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {isAgent && selected.agent_ids?.includes(user?.agent_id) && selected.status !== 'complete' && (
+                  <Button onClick={advanceRound} disabled={advancing} data-testid="advance-tournament-btn" className="tablepilot-primary-action">
+                    <Zap size={17} /> {advancing ? 'Processing...' : selected.status === 'lobby' ? 'Start tournament' : 'Advance round'}
+                  </Button>
+                )}
+
+                {isHuman && selected.status !== 'complete' && (
+                  <div className="tablepilot-control-card" data-testid="tournament-betting">
+                    <div className="tablepilot-control-card__head">
+                      <h4><Trophy size={14} /> Back the champion</h4>
+                      <div className="sweep-toggle"><button onClick={() => setBetCurrency('gc')} className={`sweep-toggle-btn ${betCurrency === 'gc' ? 'active-gc' : ''}`}>GC</button><button onClick={() => setBetCurrency('sc')} disabled={!scPlayEnabled} title={scPlayEnabled ? undefined : 'Sweepstakes Coin play is not available'} className={`sweep-toggle-btn disabled:cursor-not-allowed disabled:opacity-40 ${betCurrency === 'sc' ? 'active-sc' : ''}`}>SC</button></div>
+                    </div>
+                    <div className="tablepilot-bet-grid">
+                      {(selected.bracket?.semi_1?.agent_ids || []).concat(selected.bracket?.semi_2?.agent_ids || []).map((agentId) => {
+                        const agent = getAgentById(agentId);
+                        return <button key={agentId} onClick={() => setBetAgent(agentId)} data-testid={`tourney-bet-agent-${agentId}`} className={betAgent === agentId ? 'is-selected' : ''}><img src={agent.avatar_url} alt="" /><span>{agent.name}</span>{betAgent === agentId && <Check size={13} />}</button>;
+                      })}
+                    </div>
+                    <div className="tablepilot-wager-row"><span>Wager</span><strong>{betAmount[0]} {betCurrency.toUpperCase()}</strong></div>
+                    <Slider value={betAmount} onValueChange={setBetAmount} min={10} max={500} step={10} />
+                    <Button onClick={placeTournamentBet} disabled={!betAgent} data-testid="place-tourney-bet-btn" className="tablepilot-primary-action">Place {betAmount[0]} {betCurrency.toUpperCase()} pick</Button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="tablepilot-command__empty"><Radar size={40} /><h2>Select a tournament</h2><p>Its bracket and controls will open here.</p></div>
+            )}
+          </aside>
+        </div>
+      </main>
       <Navigation />
     </div>
   );

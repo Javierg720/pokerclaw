@@ -32,16 +32,16 @@
     --chart-4: 285 100% 50%;
     --chart-5: 0 0% 60%;
 
-    --pokerclaw-bg: #050505;
-    --pokerclaw-bg2: #0A0A0B;
-    --pokerclaw-bg3: #121214;
-    --pokerclaw-red: #FF003C;
+    --pokerclaw-bg: #030406;
+    --pokerclaw-bg2: #080a0d;
+    --pokerclaw-bg3: #101318;
+    --pokerclaw-red: #ff234f;
     --pokerclaw-red-glow: rgba(255, 0, 60, 0.5);
     --pokerclaw-red-dim: #990024;
-    --pokerclaw-cyan: #00F0FF;
-    --pokerclaw-gold: #FFE600;
+    --pokerclaw-cyan: #27e5ff;
+    --pokerclaw-gold: #f7be54;
     --pokerclaw-purple: #BD00FF;
-    --pokerclaw-surface: rgba(255, 255, 255, 0.03);
+    --pokerclaw-surface: rgba(255, 255, 255, 0.035);
     --pokerclaw-border: rgba(255, 255, 255, 0.1);
     --pokerclaw-glass: rgba(10, 10, 12, 0.7);
   }
@@ -53,12 +53,16 @@
   html {
     background: var(--pokerclaw-bg);
     color-scheme: dark;
+    scroll-behavior: smooth;
   }
 
   body {
     margin: 0;
     font-family: 'Outfit', sans-serif;
-    background: var(--pokerclaw-bg);
+    background:
+      radial-gradient(circle at 82% -10%, rgba(255, 35, 79, 0.13), transparent 32rem),
+      radial-gradient(circle at -10% 60%, rgba(39, 229, 255, 0.05), transparent 28rem),
+      var(--pokerclaw-bg);
     color: #f0f0f0;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -104,6 +108,15 @@
     border-top-color: inherit;
     border-bottom-color: inherit;
   }
+
+  button, a, input {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button:focus-visible, a:focus-visible, input:focus-visible, [role="button"]:focus-visible {
+    outline: 2px solid var(--pokerclaw-cyan);
+    outline-offset: 3px;
+  }
 }
 
 /* Scrollbar */
@@ -122,10 +135,11 @@
 
 /* Glass morphism */
 .glass {
-  background: rgba(10, 10, 12, 0.7);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(145deg, rgba(18, 21, 27, 0.88), rgba(6, 7, 10, 0.78));
+  backdrop-filter: blur(20px) saturate(120%);
+  -webkit-backdrop-filter: blur(20px) saturate(120%);
+  border: 1px solid rgba(255, 255, 255, 0.085);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 18px 60px rgba(0,0,0,.24);
 }
 
 /* Pulse animation for active elements */
@@ -202,4 +216,13 @@
   background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
   background-size: 200% 100%;
   animation: shimmer 2s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

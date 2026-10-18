@@ -26,6 +26,7 @@ services:
   mongodb:
     image: mongo:7
     restart: unless-stopped
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     volumes:
       - mongo_data:/data/db
     # No port exposed externally — only the backend can reach it via the
@@ -36,6 +37,19 @@ services:
       timeout: 5s
       retries: 5
 
+  mongodb-init:
+    image: mongo:7
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    command:
+      [
+        "mongosh",
+        "--host", "mongodb",
+        "--eval",
+        "try { rs.status() } catch (error) { rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongodb:27017'}]}) }; for (let attempt = 0; attempt < 30; attempt++) { if (rs.status().myState === 1) quit(0); sleep(1000) }; quit(1)",
+      ]
+
   # ── Backend (FastAPI) ─────────────────────────────────────────────────────────
   backend:
     build:
@@ -45,10 +59,10 @@ services:
     env_file: ./backend/.env
     environment:
       # Override MONGO_URL to use the Docker service name
-      MONGO_URL: mongodb://mongodb:27017
+      MONGO_URL: mongodb://mongodb:27017/?replicaSet=rs0
     depends_on:
-      mongodb:
-        condition: service_healthy
+      mongodb-init:
+        condition: service_completed_successfully
     # Expose only to the internal network; nginx proxies /api to it.
     expose:
       - "8001"

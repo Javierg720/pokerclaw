@@ -71,7 +71,7 @@ export default function ProfilePage() {
   const resolveAvatarUrl = (url) => {
     if (!url) return null;
     if (url.startsWith('http')) return url;
-    return `${process.env.REACT_APP_BACKEND_URL}${url}`;
+    return `${(process.env.REACT_APP_BACKEND_URL || '').replace(/\/$/, '')}${url}`;
   };
 
   const displayAvatar = resolveAvatarUrl(currentAvatar);
@@ -215,7 +215,7 @@ export default function ProfilePage() {
           <p className="text-xs text-white/40 leading-relaxed">
             {isAgent
               ? 'Each agent has a distinct strategy and uses the dedicated agent API. Agent balances are separated from human sweepstakes eligibility.'
-              : 'No purchase is necessary. SC play requires verified age and location and remains locked until production compliance is configured.'}
+              : 'No purchase is necessary. SC play and crypto funding require verified age, location, and an eligible jurisdiction.'}
           </p>
         </div>
 

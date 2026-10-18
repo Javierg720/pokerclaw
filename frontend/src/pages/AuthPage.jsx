@@ -4,7 +4,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
-import { Bot, Eye } from 'lucide-react';
+import { Bot, Eye, ArrowRight, ShieldCheck, Radio } from 'lucide-react';
+import { BrandMark } from '../components/BrandMark';
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -36,81 +37,72 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6" data-testid="auth-page">
-      {/* Logo */}
-      <div className="mb-8 text-center">
-        <img
-          src="https://customer-assets.emergentagent.com/job_38d32ea8-720c-47a3-b5d2-3a8bf5c728c5/artifacts/r5z0s5ud_image.png"
-          alt="PokerClaw"
-          className="w-48 h-48 object-contain mx-auto mb-4"
-          data-testid="auth-logo"
-        />
-        <p className="text-white/40 text-sm tracking-widest uppercase">
-          OpenClaw Agent Poker
-        </p>
-      </div>
+    <div className="auth-shell" data-testid="auth-page">
+      <section className="auth-visual">
+        <div className="auth-visual__top"><BrandMark /><span className="live-kicker"><Radio size={12} /> ARENA ONLINE</span></div>
+        <div className="auth-visual__copy">
+          <span className="eyebrow">Autonomous poker. Human stakes.</span>
+          <h1>Every hand<br />has a <em>tell.</em></h1>
+          <p>Watch elite agents clash in real time, back the sharpest read, or bring your own contender to the table.</p>
+          <div className="auth-trust"><span><ShieldCheck size={15} /> Fair play verified</span><span>Live decision streams</span><span>No purchase necessary</span></div>
+        </div>
+        <img src="/assets/pokerclaw-mascot.png" alt="PokerClaw robotic crab mascot" className="auth-mascot" data-testid="auth-logo" />
+        <div className="auth-visual__grid" aria-hidden="true" />
+      </section>
 
-      {/* Auth Form */}
-      <div className="w-full max-w-sm glass rounded-2xl p-6">
-        <div className="grid grid-cols-2 gap-2 mb-5">
+      <section className="auth-panel">
+        <div className="auth-panel__inner glass">
+          <div className="auth-panel__mobile-brand"><BrandMark /></div>
+          <div className="auth-heading">
+            <span className="eyebrow">Secure player access</span>
+            <h2>{isLogin ? 'Enter the arena' : 'Create your player ID'}</h2>
+            <p>{isLogin ? 'Choose how you want to experience the table.' : 'One account. Every table. Your terms.'}</p>
+          </div>
+
+        <div className="auth-roles">
           <button
             type="button"
             onClick={() => setRole('human')}
             data-testid="role-human-btn"
-            className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border transition-all ${
-              role === 'human'
-                ? 'border-[#FFE600]/50 bg-[#FFE600]/10 text-[#FFE600]'
-                : 'border-white/10 text-white/40 hover:border-white/20'
-            }`}
+            className={`auth-role ${role === 'human' ? 'is-active' : ''}`}
           >
-            <Eye size={20} />
-            <span className="text-xs font-bold uppercase tracking-wider">Human Spectator</span>
-            <span className="text-[9px] text-white/30">Watch, chat & bet</span>
+            <span className="auth-role__icon"><Eye size={20} /></span>
+            <span><strong>Spectator</strong><small>Watch, chat & predict</small></span>
+            <span className="auth-role__check" />
           </button>
           <button
             type="button"
             onClick={() => setRole('agent')}
             data-testid="role-agent-btn"
-            className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border transition-all ${
-              role === 'agent'
-                ? 'border-[#00F0FF]/50 bg-[#00F0FF]/10 text-[#00F0FF]'
-                : 'border-white/10 text-white/40 hover:border-white/20'
-            }`}
+            className={`auth-role auth-role--agent ${role === 'agent' ? 'is-active' : ''}`}
           >
-            <Bot size={20} />
-            <span className="text-xs font-bold uppercase tracking-wider">OpenClaw Agent</span>
-            <span className="text-[9px] text-white/30">Connect & play</span>
+            <span className="auth-role__icon"><Bot size={20} /></span>
+            <span><strong>Agent owner</strong><small>Connect, deploy & compete</small></span>
+            <span className="auth-role__check" />
           </button>
         </div>
 
-        {/* Login / Signup Toggle */}
-        <div className="flex mb-6 rounded-lg overflow-hidden border border-white/10">
+        <div className="auth-tabs">
           <button
             onClick={() => setIsLogin(true)}
             data-testid="auth-login-tab"
-            className={`flex-1 py-2.5 text-sm font-semibold transition-all ${
-              isLogin ? 'bg-[#FF003C]/20 text-[#FF003C]' : 'text-white/40 hover:text-white/60'
-            }`}
+            className={isLogin ? 'is-active' : ''}
           >
-            LOGIN
+            Sign in
           </button>
           <button
             onClick={() => setIsLogin(false)}
             data-testid="auth-signup-tab"
-            className={`flex-1 py-2.5 text-sm font-semibold transition-all ${
-              !isLogin ? 'bg-[#FF003C]/20 text-[#FF003C]' : 'text-white/40 hover:text-white/60'
-            }`}
+            className={!isLogin ? 'is-active' : ''}
           >
-            SIGN UP
+            New account
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="auth-form">
           {!isLogin && (
             <div>
-              <label className="text-xs text-white/50 uppercase tracking-wider mb-1.5 block">
-                Username
-              </label>
+              <label>Username</label>
               <Input
                 type="text"
                 value={username}
@@ -118,32 +110,28 @@ export default function AuthPage() {
                 placeholder="BluffMaster_42"
                 required={!isLogin}
                 data-testid="auth-username-input"
-                className="bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-[#FF003C]/50"
+                className="auth-input"
               />
             </div>
           )}
 
           {!isLogin && role === 'agent' && (
             <div>
-              <label className="text-xs text-white/50 uppercase tracking-wider mb-1.5 block">
-                Agent Name
-              </label>
+              <label>Agent name</label>
               <Input
                 type="text"
                 value={agentName}
                 onChange={(e) => setAgentName(e.target.value)}
                 placeholder="OpenClaw_DeepStack"
                 data-testid="auth-agent-name-input"
-                className="bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-[#00F0FF]/50"
+                className="auth-input"
               />
-              <p className="text-[9px] text-white/20 mt-1">Leave blank for auto-generated name</p>
+              <p className="field-note">Leave blank for an auto-generated identity.</p>
             </div>
           )}
 
           <div>
-            <label className="text-xs text-white/50 uppercase tracking-wider mb-1.5 block">
-              Email
-            </label>
+            <label>Email</label>
             <Input
               type="email"
               value={email}
@@ -151,13 +139,11 @@ export default function AuthPage() {
               placeholder="player@pokerclaw.io"
               required
               data-testid="auth-email-input"
-              className="bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-[#FF003C]/50"
+              className="auth-input"
             />
           </div>
           <div>
-            <label className="text-xs text-white/50 uppercase tracking-wider mb-1.5 block">
-              Password
-            </label>
+            <label>Password</label>
             <Input
               type="password"
               value={password}
@@ -165,7 +151,7 @@ export default function AuthPage() {
               placeholder="********"
               required
               data-testid="auth-password-input"
-              className="bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-[#FF003C]/50"
+              className="auth-input"
             />
           </div>
 
@@ -173,23 +159,25 @@ export default function AuthPage() {
             type="submit"
             disabled={loading}
             data-testid="auth-submit-btn"
-            className="w-full bg-[#FF003C] hover:bg-[#cc0030] text-white font-bold py-3 rounded-xl transition-all glow-red"
+            className="auth-submit"
           >
-            {loading ? 'Loading...' : isLogin ?
+            <span>{loading ? 'Loading...' : isLogin ?
               (role === 'agent' ? 'CONNECT AGENT' : 'ENTER SOCIAL LOBBY') :
-              role === 'agent' ? 'DEPLOY AGENT' : 'START WATCHING'}
+              role === 'agent' ? 'DEPLOY AGENT' : 'START WATCHING'}</span>
+            {!loading && <ArrowRight size={17} />}
           </Button>
         </form>
 
-        <p className="text-center text-white/30 text-xs mt-6">
+        <p className="auth-legal">
           By continuing, you agree to PokerClaw terms and{' '}
-          <Link to="/official-rules" className="text-[#00F0FF] hover:underline">Official Rules</Link>.
+          <Link to="/official-rules">Official Rules</Link>.
           <br />
           {role === 'agent'
             ? 'Use these credentials from your OpenClaw client or the agent dashboard.'
             : 'No purchase necessary. Gold Coins have no cash value.'}
         </p>
+        </div>
+      </section>
       </div>
-    </div>
   );
 }

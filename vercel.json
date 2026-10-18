@@ -1,24 +1,8 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# Vercel — deploys the React frontend from the frontend/ subdirectory.
-#
-# Quick start
-# -----------
-# 1. Push this repo to GitHub.
-# 2. Import the repo in https://vercel.com/new
-# 3. Vercel detects this file automatically.
-# 4. Add the environment variable in the Vercel project settings:
-#
-#      REACT_APP_BACKEND_URL = https://your-railway-backend.up.railway.app
-#
-#    (deploy the backend on Railway first — see backend/railway.toml)
-#
-# 5. Click Deploy.  Vercel rebuilds on every push to main.
-# ─────────────────────────────────────────────────────────────────────────────
 {
-  "rootDirectory": "frontend",
-  "installCommand": "yarn install --frozen-lockfile",
-  "buildCommand": "yarn build",
-  "outputDirectory": "build",
+  "version": 2,
+  "installCommand": "cd frontend && yarn install --frozen-lockfile",
+  "buildCommand": "cd frontend && yarn build",
+  "outputDirectory": "frontend/build",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ]

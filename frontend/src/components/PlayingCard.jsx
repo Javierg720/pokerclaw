@@ -14,9 +14,9 @@ const SUIT_COLORS = {
 
 export function PlayingCard({ card, size = 'md', delay = 0, dealFrom }) {
   const sizes = {
-    xs: 'w-7 h-10 text-[6px]',
-    sm: 'w-9 h-[52px] text-[10px]',
-    md: 'w-12 h-[68px] text-xs',
+    xs: 'playing-card--xs w-12 h-[68px] text-xs',
+    sm: 'playing-card--sm w-[54px] h-[76px] text-sm',
+    md: 'playing-card--md w-[56px] h-20 text-sm',
     lg: 'w-20 h-28 text-lg',
   };
 
@@ -48,14 +48,14 @@ export function PlayingCard({ card, size = 'md', delay = 0, dealFrom }) {
       style={style}
       data-testid={`card-${card.rank}-${card.suit}`}
     >
-      <div className={`${colorClass} font-bold leading-none`}>
+      <div className={`${colorClass} playing-card__corner font-bold leading-none`}>
         <div>{card.rank}</div>
         <div className="text-[0.7em]">{suitSymbol}</div>
       </div>
-      <div className={`${colorClass} text-center text-[1.4em] leading-none`}>
+      <div className={`${colorClass} playing-card__pip text-center text-[1.4em] leading-none`}>
         {suitSymbol}
       </div>
-      <div className={`${colorClass} font-bold leading-none self-end rotate-180`}>
+      <div className={`${colorClass} playing-card__corner font-bold leading-none self-end rotate-180`}>
         <div>{card.rank}</div>
         <div className="text-[0.7em]">{suitSymbol}</div>
       </div>

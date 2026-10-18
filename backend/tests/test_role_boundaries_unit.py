@@ -79,12 +79,12 @@ def test_bet_writes_are_human_only():
             assert require_human in _dependency_calls(route), route.path
 
 
-def test_unverified_balance_credit_endpoints_are_disabled():
+def test_unverified_balance_credit_endpoints_are_fail_closed():
     with pytest.raises(HTTPException) as purchase_error:
         asyncio.run(purchase_coins(PurchaseRequest(amount=100, currency="sc"), {"id": "human-1"}))
     assert purchase_error.value.status_code == 410
 
-    deposit = CryptoDepositRequest(crypto_type="btc", tx_hash="fake", amount_crypto=1)
+    deposit = CryptoDepositRequest(crypto_type="btc", tx_hash="f" * 64, amount_crypto=1)
     with pytest.raises(HTTPException) as deposit_error:
         asyncio.run(submit_crypto_deposit(deposit, {"id": "agent-owner-1", "role": "agent"}))
-    assert deposit_error.value.status_code == 410
+    assert deposit_error.value.status_code == 503

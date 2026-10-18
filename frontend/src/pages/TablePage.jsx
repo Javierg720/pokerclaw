@@ -7,7 +7,7 @@ import { ChatPanel } from '../components/ChatPanel';
 import { Navigation } from '../components/Navigation';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { ArrowLeft, Play, SkipForward, Zap, Crown, Volume2, VolumeX, Eye, TrendingUp } from 'lucide-react';
+import { ArrowLeft, Play, SkipForward, Zap, Crown, Volume2, VolumeX, Eye, TrendingUp, BrainCircuit, ShieldCheck, ChevronDown, Bot, Activity } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from 'sonner';
 import { sounds } from '../lib/sounds';
@@ -90,7 +90,7 @@ function SeatPlayer({ player, showCards, isWinner, reversed, dealFrom, isActing,
     : 'agent-ring-active';
 
   const avatar = (
-    <div className="flex flex-col items-center gap-0.5">
+    <div className="seat-player__identity flex flex-col items-center gap-0.5">
       <div className="relative">
         {/* Timer ring */}
         {isActing && (
@@ -110,7 +110,7 @@ function SeatPlayer({ player, showCards, isWinner, reversed, dealFrom, isActing,
           <img
             src={player.avatar_url}
             alt={player.agent_name}
-            className="w-9 h-9 rounded-full object-cover"
+            className="agent-avatar agent-avatar--seat rounded-full object-cover"
           />
         </div>
         {player.is_dealer && (
@@ -126,16 +126,16 @@ function SeatPlayer({ player, showCards, isWinner, reversed, dealFrom, isActing,
         )}
       </div>
       <div className={`seat-nameplate ${isWinner ? 'is-winner' : ''} ${player.folded ? 'is-folded' : ''}`}>
-        <div className="text-[9px] font-bold text-white truncate max-w-[68px]">
+        <div className="text-[11px] font-bold text-white truncate max-w-[82px]">
           {player.agent_name}
         </div>
-        <div className="text-[8px] text-white/40 mono">{player.chips}</div>
+        <div className="text-[10px] text-white/60 mono">{player.chips}</div>
       </div>
     </div>
   );
 
   const cards = (
-    <div className="flex gap-0.5 justify-center" data-testid={`seat-cards-${player.agent_id}`}>
+    <div className="seat-player__cards flex gap-0.5 justify-center" data-testid={`seat-cards-${player.agent_id}`}>
       {showCards && player.hole_cards?.[0] ? (
         <>
           <PlayingCard card={player.hole_cards[0]} size="xs" delay={0} dealFrom={dealFrom} />
@@ -151,23 +151,23 @@ function SeatPlayer({ player, showCards, isWinner, reversed, dealFrom, isActing,
   );
 
   const actionBadge = player.folded ? (
-    <span className="action-badge action-fold text-[7px]">FOLD</span>
+    <span className="action-badge action-fold text-[9px]">FOLD</span>
   ) : lastAction && lastAction.agent_id === player.agent_id ? (
-    <span className={`action-badge text-[7px] ${
+    <span className={`action-badge text-[9px] ${
       lastAction.action === 'raise' ? 'action-raise' :
       lastAction.action === 'fold' ? 'action-fold' : 'action-call'
     }`}>
       {lastAction.action.toUpperCase()}{lastAction.amount > 0 ? ` ${lastAction.amount}` : ''}
     </span>
   ) : showCards && player.hand_name ? (
-    <span className="text-[8px] text-[#00F0FF] font-bold">{player.hand_name}</span>
+    <span className="text-[10px] text-[#42eaff] font-bold">{player.hand_name}</span>
   ) : null;
 
   return (
-    <div className={`flex flex-col items-center gap-1 ${player.folded ? 'opacity-40' : ''}`}>
+    <div className={`seat-player ${reversed ? 'seat-player--reversed' : ''} ${player.folded ? 'opacity-40' : ''}`}>
       {reversed ? (
         <>
-          {actionBadge}
+          <div className="seat-player__action">{actionBadge}</div>
           {cards}
           {avatar}
         </>
@@ -175,7 +175,7 @@ function SeatPlayer({ player, showCards, isWinner, reversed, dealFrom, isActing,
         <>
           {avatar}
           {cards}
-          {actionBadge}
+          <div className="seat-player__action">{actionBadge}</div>
         </>
       )}
     </div>
@@ -225,27 +225,27 @@ function PokerTableVisual({ game, showCards, currentActor, timerPct, lastAction 
   };
 
   return (
-    <div className="poker-table-grid" style={{ height: '420px' }} data-testid="poker-table">
+    <div className="poker-table-grid" data-testid="poker-table">
       {/* Row 1 - Top */}
-      {renderSeat('topLeft', 'flex items-end justify-center pb-1')}
-      {renderSeat('topCenter', 'flex items-end justify-center pb-1')}
-      {renderSeat('topRight', 'flex items-end justify-center pb-1')}
+      {renderSeat('topLeft', 'poker-seat poker-seat--top-left')}
+      {renderSeat('topCenter', 'poker-seat poker-seat--top-center')}
+      {renderSeat('topRight', 'poker-seat poker-seat--top-right')}
 
       {/* Row 2 - Middle */}
-      {renderSeat('midLeft', 'flex items-center justify-center')}
+      {renderSeat('midLeft', 'poker-seat poker-seat--mid-left')}
 
       {/* THE TABLE FELT */}
       <div className="poker-felt rounded-[45%] flex flex-col items-center justify-center gap-1.5 p-2">
         {/* Pot */}
-        <div className="text-center z-10">
-          <span className="text-[10px] text-white/30 uppercase tracking-widest">Pot</span>
-          <div className="text-lg font-black text-[#FFE600] text-glow-gold mono leading-tight" data-testid="pot-display">
+        <div className="table-pot text-center z-10">
+          <span className="text-[11px] text-white/60 uppercase tracking-widest">Pot</span>
+          <div className="text-xl font-black text-[#FFE600] text-glow-gold mono leading-tight" data-testid="pot-display">
             {game?.pot || 0}
           </div>
         </div>
 
         {/* Community cards */}
-        <div className="flex gap-1 justify-center z-10" data-testid="community-cards">
+        <div className="community-board flex gap-1 justify-center z-10" data-testid="community-cards">
           {[0, 1, 2, 3, 4].map((i) =>
             game?.community_cards?.[i] ? (
               <PlayingCard
@@ -258,7 +258,7 @@ function PokerTableVisual({ game, showCards, currentActor, timerPct, lastAction 
             ) : (
               <div
                 key={`cc-empty-${i}`}
-                className="w-8 h-12 rounded border border-white/[0.06] bg-white/[0.015]"
+                className="community-card-slot w-[50px] h-[72px] rounded"
               />
             )
           )}
@@ -283,12 +283,89 @@ function PokerTableVisual({ game, showCards, currentActor, timerPct, lastAction 
         </div>
       </div>
 
-      {renderSeat('midRight', 'flex items-center justify-center')}
+      {renderSeat('midRight', 'poker-seat poker-seat--mid-right')}
 
       {/* Row 3 - Bottom */}
-      {renderSeat('botLeft', 'flex items-start justify-center pt-1')}
-      {renderSeat('botCenter', 'flex items-start justify-center pt-1')}
-      {renderSeat('botRight', 'flex items-start justify-center pt-1')}
+      {renderSeat('botLeft', 'poker-seat poker-seat--bottom-left')}
+      {renderSeat('botCenter', 'poker-seat poker-seat--bottom-center')}
+      {renderSeat('botRight', 'poker-seat poker-seat--bottom-right')}
+    </div>
+  );
+}
+
+function AIIntelPanel({ intel, open, onToggle }) {
+  const decisions = intel?.decisions?.slice(-6).reverse() || [];
+  return (
+    <div className="mx-2 rounded-xl border border-[#00F0FF]/15 bg-[#071014]/90 overflow-hidden" data-testid="ai-intel-panel">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center gap-2 px-3 py-2.5 text-left"
+        data-testid="ai-intel-toggle"
+        aria-expanded={open}
+      >
+        <span className="w-8 h-8 rounded-lg bg-[#00F0FF]/10 grid place-items-center border border-[#00F0FF]/20">
+          <BrainCircuit size={17} className="text-[#00F0FF]" />
+        </span>
+        <span className="flex-1 min-w-0">
+          <span className="flex items-center gap-1.5 text-[11px] font-black tracking-widest text-white uppercase">
+            AI Intel <ShieldCheck size={12} className="text-emerald-400" />
+          </span>
+          <span className="block text-[10px] text-white/45">Audited strategy, records & public decision logs</span>
+        </span>
+        <ChevronDown size={16} className={`text-white/40 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="border-t border-white/[0.06] p-3 space-y-3">
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {(intel?.agents || []).map((agent) => (
+              <div key={agent.agent_id} className="min-w-[178px] rounded-xl border border-white/[0.08] bg-white/[0.025] p-2.5">
+                <div className="flex items-center gap-2">
+                  <img src={agent.avatar_url} alt="" className="w-9 h-9 rounded-full object-cover border border-[#00F0FF]/30" />
+                  <div className="min-w-0">
+                    <div className="text-[11px] text-white font-bold truncate">{agent.name}</div>
+                    <div className="text-[9px] text-[#00F0FF] uppercase tracking-wide truncate">
+                      {agent.personality?.name || 'AI Agent'}
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-1 mt-2 text-[9px]">
+                  <span className="text-white/35">Strategy</span>
+                  <span className="text-white/75 text-right capitalize">{agent.strategy?.replaceAll('_', ' ')}</span>
+                  <span className="text-white/35">Win rate</span>
+                  <span className="text-[#FFE600] text-right font-bold mono">{agent.stats?.win_rate || 0}%</span>
+                  <span className="text-white/35">Source</span>
+                  <span className="text-emerald-400 text-right">{agent.decision_source === 'external_agent' ? 'OpenClaw' : 'Verified policy'}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <div className="flex items-center gap-1.5 mb-2 text-[10px] uppercase tracking-widest text-white/50 font-bold">
+              <Activity size={12} /> Decision log
+            </div>
+            {decisions.length === 0 ? (
+              <p className="text-[10px] text-white/30">Decision summaries appear after the first action.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {decisions.map((decision) => (
+                  <div key={decision.decision_id} className="rounded-lg bg-black/20 border border-white/[0.05] px-2.5 py-2">
+                    <div className="flex items-center gap-2 text-[10px]">
+                      <Bot size={11} className="text-[#00F0FF] flex-shrink-0" />
+                      <span className="text-white/75 font-bold truncate">{decision.agent_name}</span>
+                      <span className={`action-badge action-${decision.action} ml-auto`}>{decision.action}</span>
+                    </div>
+                    <p className="text-[10px] text-white/45 mt-1 leading-relaxed">{decision.public_explanation}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <p className="text-[9px] text-white/25 leading-relaxed">{intel?.disclosure}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -307,6 +384,9 @@ export default function TablePage() {
   const [odds, setOdds] = useState(null);
   const [timer, setTimer] = useState(0);
   const [timerMax] = useState(10);
+  const [intel, setIntel] = useState(null);
+  const [intelOpen, setIntelOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const prevPhaseRef = useRef(null);
   const timerRef = useRef(null);
   const autoAdvanceRef = useRef(null);
@@ -338,6 +418,18 @@ export default function TablePage() {
   }, [game?.id]);
 
   useEffect(() => { fetchTable(); }, [fetchTable]);
+
+  useEffect(() => {
+    if (!game?.id) {
+      setIntel(null);
+      return;
+    }
+    let active = true;
+    api.get(`/games/${game.id}/transparency`)
+      .then((res) => { if (active) setIntel(res.data); })
+      .catch(() => { if (active) setIntel(null); });
+    return () => { active = false; };
+  }, [game?.id, actions.length]);
 
   // Fetch odds periodically
   useEffect(() => {
@@ -484,7 +576,7 @@ export default function TablePage() {
   return (
     <div className="main-content" data-testid="table-page">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 pt-3 pb-1">
+      <div className="table-topbar">
         <button onClick={() => navigate('/lobby')} data-testid="back-to-lobby" className="text-white/50 hover:text-white transition-colors">
           <ArrowLeft size={20} />
         </button>
@@ -497,27 +589,29 @@ export default function TablePage() {
               </Badge>
             )}
             <span className="flex items-center gap-1 text-[10px] text-white/30">
-              <Eye size={10} />
+          <Eye size={13} />
               {spectators}
             </span>
             {connected && <span className="w-1.5 h-1.5 rounded-full bg-[#00F0FF]" title="Live" />}
           </div>
         </div>
         <button onClick={toggleSound} data-testid="sound-toggle" className="text-white/40 hover:text-white transition-colors">
-          {soundOn ? <Volume2 size={18} /> : <VolumeX size={18} />}
+          {soundOn ? <Volume2 size={21} /> : <VolumeX size={21} />}
         </button>
       </div>
 
       {/* Live Odds Ticker */}
       {odds && odds.total_pool > 0 && canBet && (
-        <div className="mx-4 mb-2 glass rounded-lg p-2 flex items-center gap-3 overflow-x-auto" data-testid="odds-ticker">
-          <TrendingUp size={12} className="text-[#FFE600] flex-shrink-0" />
-          <span className="text-[9px] text-white/30 flex-shrink-0">LIVE ODDS</span>
+        <div className="odds-ticker mx-4 glass rounded-lg p-2 flex items-center gap-3 overflow-x-auto" data-testid="odds-ticker">
+          <TrendingUp size={15} className="text-[#FFE600] flex-shrink-0" />
+          <span className="text-[10px] text-white/55 font-bold flex-shrink-0">LIVE ODDS</span>
           {odds.odds.filter(o => !o.folded).map(o => (
             <div key={o.agent_id} className="flex items-center gap-1.5 flex-shrink-0">
-              <img src={o.avatar_url} alt="" className="w-4 h-4 rounded-full" />
-              <span className="text-[9px] text-white/50 truncate max-w-[50px]">{o.agent_name}</span>
-              <span className="text-[10px] font-black text-[#FFE600] mono">{o.multiplier}x</span>
+              <span className="agent-avatar-frame agent-avatar-frame--odds">
+                <img src={o.avatar_url} alt="" className="agent-avatar rounded-full" />
+              </span>
+              <span className="text-[10px] text-white/70 font-medium truncate max-w-[66px]">{o.agent_name}</span>
+              <span className="text-[11px] font-black text-[#FFE600] mono">{o.multiplier}x</span>
             </div>
           ))}
         </div>
@@ -565,7 +659,7 @@ export default function TablePage() {
         </div>
       ) : (
         /* Active game - Poker Table View */
-        <div className="px-2 space-y-3">
+        <div className={`table-stage px-2 space-y-3 ${chatOpen ? 'table-stage--chat-open' : ''}`}>
           {/* THE POKER TABLE */}
           <PokerTableVisual
             game={game}
@@ -578,11 +672,11 @@ export default function TablePage() {
           {/* Actions Log */}
           {lastActions.length > 0 && (
             <div className="glass rounded-xl p-3 mx-2" data-testid="actions-log">
-              <h4 className="text-[10px] text-white/30 uppercase tracking-widest mb-2">Actions</h4>
+              <h4 className="text-[11px] text-white/55 font-bold uppercase tracking-widest mb-2">Actions</h4>
               <div className="flex flex-wrap gap-x-3 gap-y-1">
                 {lastActions.map((a, i) => (
                   <div key={i} className="flex items-center gap-1.5 text-[11px]">
-                    <span className="text-white/50 truncate max-w-[80px]">{a.agent_name}</span>
+                    <span className="text-white/70 font-medium truncate max-w-[96px]">{a.agent_name}</span>
                     <span className={`action-badge action-${a.action}`}>
                       {a.action} {a.amount > 0 ? a.amount : ''}
                     </span>
@@ -592,12 +686,14 @@ export default function TablePage() {
             </div>
           )}
 
+          <AIIntelPanel intel={intel} open={intelOpen} onToggle={() => setIntelOpen((value) => !value)} />
+
           {/* Timer Display */}
           {autoPlay && game?.is_betting && currentActor && (
             <div className="flex items-center justify-center gap-2 mx-2" data-testid="decision-timer">
               <div className="glass rounded-lg px-3 py-1.5 flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-[#FF003C] animate-pulse" />
-                <span className="text-[10px] text-white/50">
+                <span className="text-[11px] text-white/70">
                   {game.players?.find(p => p.agent_id === currentActor)?.agent_name || 'Agent'} deciding...
                 </span>
                 <span className="text-xs font-black text-[#FF003C] mono">{timer}s</span>
@@ -644,6 +740,7 @@ export default function TablePage() {
         onSendChat={handleSendChat}
         onSendReaction={handleSendReaction}
         username={user?.username}
+        onOpenChange={setChatOpen}
       />
 
       <Navigation />

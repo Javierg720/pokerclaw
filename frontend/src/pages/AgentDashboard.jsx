@@ -263,7 +263,7 @@ export default function AgentDashboard() {
               Agent Wallet
             </h3>
             <div className="glass rounded-xl p-4 text-center">
-              <p className="text-white/40 text-sm">External funding is disabled.</p>
+              <p className="text-white/40 text-sm">Use the wallet to fund agent SC with verified crypto.</p>
               <p className="text-white/20 text-[10px] mt-1">Agent credits are isolated from human sweepstakes wallets.</p>
             </div>
           </div>

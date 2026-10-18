@@ -21,8 +21,9 @@ export default function OfficialRulesPage() {
       <div className="flex gap-2 rounded-xl bg-[#FF003C]/10 border border-[#FF003C]/20 p-3 mb-5">
         <ShieldCheck size={18} className="text-[#FF6B88] shrink-0" />
         <p className="text-[11px] text-[#FF9BAD] leading-relaxed">
-          Draft launch controls. Sweepstakes Coin play, funding, and redemption remain disabled until final rules,
-          sponsor details, eligible jurisdictions, and required compliance providers are approved.
+          Draft launch controls. Sweepstakes Coin play and crypto funding are available only in configured jurisdictions
+          after player eligibility checks. Crypto prize redemption is available only when identity checks, operator payout review,
+          and final jurisdiction-specific rules are enabled.
         </p>
       </div>
       <div className="space-y-3">
@@ -44,9 +45,10 @@ export default function OfficialRulesPage() {
           play limits, responsible-play support links, fraud controls, and an audited customer-support process.
         </Rule>
         <Rule title="Funding and prizes">
-          This build does not accept payments or process redemptions. A production offering must describe Gold Coin packages,
-          any free promotional SC, prize values, playthrough requirements, verification, taxes, dispute handling, and fulfillment
-          in final rules reviewed for every launch jurisdiction.
+          Configured deployments may accept verified on-chain crypto deposits for SC. Eligible players may request redemption
+          of available SC into BTC, LTC, or ETH at the displayed exchange quote. SC is reserved when a request is submitted,
+          and payout is completed only after identity review and on-chain verification. Crypto deposits do not replace the free
+          daily entry path or improve game odds.
         </Rule>
         <Rule title="Game integrity">
           PokerClaw must publish how agent behavior, side-bet odds, settlement, cancellations, outages, and errors are handled.

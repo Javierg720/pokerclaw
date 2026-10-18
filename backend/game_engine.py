@@ -1,6 +1,7 @@
 import random
 from itertools import combinations
 from collections import Counter
+from agent_entertainment import build_decision_provenance
 
 SUITS = ['hearts', 'diamonds', 'clubs', 'spades']
 RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
@@ -21,21 +22,21 @@ STRATEGIES = {
 }
 
 AGENT_PRESETS = [
-    {"name": "BluffBot_9000", "strategy": "bluffer", "avatar_index": 0, "tagline": "All-in or nothing."},
-    {"name": "Neural_Ace", "strategy": "balanced", "avatar_index": 1, "tagline": "Calculated precision."},
-    {"name": "Vector_King", "strategy": "conservative", "avatar_index": 2, "tagline": "Patience is profit."},
-    {"name": "Quantum_Queen", "strategy": "aggressive", "avatar_index": 3, "tagline": "Chaos is a ladder."},
-    {"name": "Deep_Stack", "strategy": "tight_aggressive", "avatar_index": 0, "tagline": "Deep reads, deep pockets."},
-    {"name": "Fold_Master", "strategy": "conservative", "avatar_index": 1, "tagline": "Live to fight another day."},
-    {"name": "Claw_Crusher", "strategy": "aggressive", "avatar_index": 2, "tagline": "Crush. Dominate. Repeat."},
-    {"name": "Molt_Mind", "strategy": "loose_passive", "avatar_index": 3, "tagline": "Slow and steady wins."},
+    {"name": "BluffBot_9000", "strategy": "bluffer", "avatar_index": 0, "tagline": "All-in or nothing.", "personality_key": "showboat"},
+    {"name": "Neural_Ace", "strategy": "balanced", "avatar_index": 1, "tagline": "Calculated precision.", "personality_key": "analyst"},
+    {"name": "Vector_King", "strategy": "conservative", "avatar_index": 2, "tagline": "Patience is profit.", "personality_key": "fortress"},
+    {"name": "Quantum_Queen", "strategy": "aggressive", "avatar_index": 3, "tagline": "Chaos is a ladder.", "personality_key": "chaos"},
+    {"name": "Deep_Stack", "strategy": "tight_aggressive", "avatar_index": 0, "tagline": "Deep reads, deep pockets.", "personality_key": "shark"},
+    {"name": "Fold_Master", "strategy": "conservative", "avatar_index": 1, "tagline": "Live to fight another day.", "personality_key": "survivor"},
+    {"name": "Claw_Crusher", "strategy": "aggressive", "avatar_index": 2, "tagline": "Crush. Dominate. Repeat.", "personality_key": "enforcer"},
+    {"name": "Molt_Mind", "strategy": "loose_passive", "avatar_index": 3, "tagline": "Slow and steady wins.", "personality_key": "zen"},
 ]
 
 AVATAR_URLS = [
-    "https://images.unsplash.com/photo-1728112265403-a4aebd5859a5?w=200&h=200&fit=crop",
-    "https://images.unsplash.com/photo-1711662171213-4141abec218f?w=200&h=200&fit=crop",
-    "https://images.unsplash.com/photo-1677212004257-103cfa6b59d0?w=200&h=200&fit=crop",
-    "https://images.unsplash.com/photo-1732020858816-93c130ab8f49?w=200&h=200&fit=crop",
+    "/assets/avatars/bluffbot-9000.png",
+    "/assets/avatars/neural-ace.png",
+    "/assets/avatars/vector-king.png",
+    "/assets/avatars/quantum-queen.png",
 ]
 
 
@@ -283,12 +284,21 @@ def advance_game(game, external_action=None):
                     game.get('round_bet', 0), player['chips'], betting_phase
                 )
 
+            decision_source = (
+                "external_agent"
+                if external_action and external_action.get('agent_id') == player['agent_id']
+                else "pokerclaw_policy"
+            )
+            provenance = build_decision_provenance(
+                game, player, act, amount, decision_source
+            )
+
             if act == 'fold':
                 player['folded'] = True
                 action = {
                     'agent_id': player['agent_id'],
                     'agent_name': player['agent_name'],
-                    'action': 'fold', 'amount': 0
+                    'action': 'fold', 'amount': 0, **provenance
                 }
             elif act == 'raise':
                 player['chips'] -= amount
@@ -299,7 +309,7 @@ def advance_game(game, external_action=None):
                 action = {
                     'agent_id': player['agent_id'],
                     'agent_name': player['agent_name'],
-                    'action': 'raise', 'amount': amount
+                    'action': 'raise', 'amount': amount, **provenance
                 }
             else:
                 call_amt = min(game.get('round_bet', 0), player['chips'])
@@ -310,7 +320,7 @@ def advance_game(game, external_action=None):
                 action = {
                     'agent_id': player['agent_id'],
                     'agent_name': player['agent_name'],
-                    'action': 'call', 'amount': call_amt
+                    'action': 'call', 'amount': call_amt, **provenance
                 }
 
             game['turn_index'] = game.get('turn_index', 0) + 1
