@@ -1,7 +1,7 @@
 {
   "version": 2,
-  "installCommand": "cd frontend && yarn install --frozen-lockfile",
-  "buildCommand": "cd frontend && yarn build",
+  "installCommand": "cd frontend && corepack yarn install --frozen-lockfile",
+  "buildCommand": "cd frontend && corepack yarn build",
   "outputDirectory": "frontend/build",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
